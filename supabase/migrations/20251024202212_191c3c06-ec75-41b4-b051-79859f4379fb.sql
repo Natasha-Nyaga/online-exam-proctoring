@@ -150,7 +150,6 @@ CREATE POLICY "Students can view all exams"
 CREATE POLICY "Admins can view all exams"
   ON public.exams FOR SELECT
   USING (public.has_role(auth.uid(), 'admin'));
-
 CREATE POLICY "Admins can create exams"
   ON public.exams FOR INSERT
   WITH CHECK (public.has_role(auth.uid(), 'admin'));
