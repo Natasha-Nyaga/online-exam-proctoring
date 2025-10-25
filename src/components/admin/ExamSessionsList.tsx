@@ -17,6 +17,7 @@ interface ExamSession {
     student_id: string;
     profiles: { name: string };
   };
+  incident_count?: number;
 }
 
 const ExamSessionsList = () => {
@@ -30,7 +31,7 @@ const ExamSessionsList = () => {
 
   const fetchSessions = async () => {
     try {
-      const { data, error } = await supabase
+      const { data: sessionsData, error } = await supabase
         .from("exam_sessions")
         .select(`
           id,
@@ -46,7 +47,20 @@ const ExamSessionsList = () => {
         .order("started_at", { ascending: false });
 
       if (error) throw error;
-      setSessions(data || []);
+
+      // Fetch incident counts for each session
+      const sessionsWithCounts = await Promise.all(
+        (sessionsData || []).map(async (session) => {
+          const { count } = await supabase
+            .from("cheating_incidents")
+            .select("*", { count: "exact", head: true })
+            .eq("session_id", session.id);
+          
+          return { ...session, incident_count: count || 0 };
+        })
+      );
+
+      setSessions(sessionsWithCounts);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -102,52 +116,76 @@ const ExamSessionsList = () => {
     }
   };
 
-  if (loading) {
-    return <p className="text-muted-foreground">Loading sessions...</p>;
-  }
-
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Completed Exam Sessions</CardTitle>
+        <CardTitle className="text-xl">Student Exam Sessions & Flagged Reports</CardTitle>
+        <p className="text-sm text-muted-foreground mt-2">
+          Monitor exam sessions, view anomaly counts, and download detailed incident reports
+        </p>
       </CardHeader>
       <CardContent>
-        {sessions.length === 0 ? (
-          <p className="text-muted-foreground text-center py-8">No exam sessions yet.</p>
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-current border-r-transparent"></div>
+            <p className="mt-4 text-muted-foreground">Loading sessions...</p>
+          </div>
+        ) : sessions.length === 0 ? (
+          <div className="text-center py-12 border-2 border-dashed rounded-lg bg-muted/20">
+            <p className="text-muted-foreground text-lg font-medium">No exam sessions found</p>
+            <p className="text-sm text-muted-foreground mt-2">
+              Sessions will appear here once students complete exams
+            </p>
+          </div>
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Student</TableHead>
-                <TableHead>Student ID</TableHead>
-                <TableHead>Exam</TableHead>
-                <TableHead>Started</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sessions.map((session) => (
-                <TableRow key={session.id}>
-                  <TableCell>{session.students.profiles.name}</TableCell>
-                  <TableCell>{session.students.student_id}</TableCell>
-                  <TableCell>{session.exams.title}</TableCell>
-                  <TableCell>{new Date(session.started_at).toLocaleString()}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={
-                        session.status === "completed"
-                          ? "default"
-                          : session.status === "in_progress"
-                          ? "secondary"
-                          : "destructive"
-                      }
-                    >
-                      {session.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="font-semibold">Student Name</TableHead>
+                  <TableHead className="font-semibold">Student ID</TableHead>
+                  <TableHead className="font-semibold">Exam Title</TableHead>
+                  <TableHead className="font-semibold">Started At</TableHead>
+                  <TableHead className="font-semibold">Status</TableHead>
+                  <TableHead className="font-semibold text-center">Anomalies</TableHead>
+                  <TableHead className="font-semibold">Download</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sessions.map((session) => (
+                  <TableRow key={session.id}>
+                    <TableCell className="font-medium">
+                      {session.students.profiles.name}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {session.students.student_id}
+                    </TableCell>
+                    <TableCell>{session.exams.title}</TableCell>
+                    <TableCell className="text-sm">
+                      {new Date(session.started_at).toLocaleString()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          session.status === "completed"
+                            ? "default"
+                            : session.status === "in_progress"
+                            ? "secondary"
+                            : "destructive"
+                        }
+                      >
+                        {session.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge 
+                        variant={session.incident_count! > 0 ? "destructive" : "outline"}
+                        className="font-semibold"
+                      >
+                        {session.incident_count}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
                       <Button
                         size="sm"
                         variant="outline"
@@ -156,12 +194,12 @@ const ExamSessionsList = () => {
                         <Download className="h-4 w-4 mr-2" />
                         Report
                       </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </CardContent>
     </Card>

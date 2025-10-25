@@ -115,7 +115,10 @@ const CreateExamForm = () => {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create New Exam</CardTitle>
+        <CardTitle className="text-xl">Create New Examination</CardTitle>
+        <p className="text-sm text-muted-foreground mt-2">
+          Upload a new exam with multiple-choice or essay questions
+        </p>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">

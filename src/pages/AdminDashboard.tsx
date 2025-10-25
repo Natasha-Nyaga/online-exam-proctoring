@@ -41,31 +41,47 @@ const AdminDashboard = () => {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex justify-between items-center">
+      <header className="border-b bg-card shadow-sm">
+        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            <p className="text-muted-foreground">Welcome, {adminName}</p>
+            <h1 className="text-3xl font-bold text-foreground">Instructor Dashboard</h1>
+            <p className="text-muted-foreground mt-1">Welcome back, {adminName || "Instructor"}</p>
           </div>
-          <Button onClick={handleLogout} variant="outline">
+          <Button onClick={handleLogout} variant="outline" size="lg">
             Logout
           </Button>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="create" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="create">Create Exam</TabsTrigger>
-            <TabsTrigger value="sessions">Exam Sessions</TabsTrigger>
+        <Tabs defaultValue="sessions" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
+            <TabsTrigger value="sessions" className="text-base">
+              Flagged Sessions
+            </TabsTrigger>
+            <TabsTrigger value="create" className="text-base">
+              Upload Exam
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="create" className="space-y-4">
-            <CreateExamForm />
+          <TabsContent value="sessions" className="space-y-4">
+            <div className="mb-6">
+              <h2 className="text-2xl font-semibold mb-2">Student Exam Sessions</h2>
+              <p className="text-muted-foreground">
+                View all completed exam sessions, cheating incidents, and download detailed reports
+              </p>
+            </div>
+            <ExamSessionsList />
           </TabsContent>
 
-          <TabsContent value="sessions" className="space-y-4">
-            <ExamSessionsList />
+          <TabsContent value="create" className="space-y-4">
+            <div className="mb-6">
+              <h2 className="text-2xl font-semibold mb-2">Upload New Examination</h2>
+              <p className="text-muted-foreground">
+                Create a new exam that will be visible to all students
+              </p>
+            </div>
+            <CreateExamForm />
           </TabsContent>
         </Tabs>
       </main>
