@@ -27,6 +27,8 @@ const CreateExamForm = () => {
     { question_text: "", question_type: "mcq", options: ["", "", "", ""], correct_answer: "", points: 1 },
   ]);
 
+  console.log("CreateExamForm rendered", { examTitle, questions: questions.length });
+
   const addQuestion = () => {
     setQuestions([
       ...questions,
