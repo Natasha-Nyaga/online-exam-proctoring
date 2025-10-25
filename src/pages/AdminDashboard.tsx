@@ -74,14 +74,16 @@ const AdminDashboard = () => {
             <ExamSessionsList />
           </TabsContent>
 
-          <TabsContent value="create" className="space-y-4">
+          <TabsContent value="create" className="space-y-4 min-h-[600px]">
             <div className="mb-6">
               <h2 className="text-2xl font-semibold mb-2">Upload New Examination</h2>
               <p className="text-muted-foreground">
                 Create a new exam that will be visible to all students
               </p>
             </div>
-            <CreateExamForm />
+            <div className="w-full">
+              <CreateExamForm />
+            </div>
           </TabsContent>
         </Tabs>
       </main>

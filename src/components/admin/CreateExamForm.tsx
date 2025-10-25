@@ -27,8 +27,6 @@ const CreateExamForm = () => {
     { question_text: "", question_type: "mcq", options: ["", "", "", ""], correct_answer: "", points: 1 },
   ]);
 
-  console.log("CreateExamForm rendered", { examTitle, questions: questions.length });
-
   const addQuestion = () => {
     setQuestions([
       ...questions,
@@ -115,14 +113,15 @@ const CreateExamForm = () => {
   };
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-xl">Create New Examination</CardTitle>
-        <p className="text-sm text-muted-foreground mt-2">
-          Upload a new exam with multiple-choice or essay questions
-        </p>
-      </CardHeader>
-      <CardContent>
+    <div className="w-full">
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle className="text-xl">Create New Examination</CardTitle>
+          <p className="text-sm text-muted-foreground mt-2">
+            Upload a new exam with multiple-choice or essay questions
+          </p>
+        </CardHeader>
+        <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-2">
             <Label htmlFor="title">Exam Title</Label>
@@ -251,7 +250,8 @@ const CreateExamForm = () => {
           </Button>
         </form>
       </CardContent>
-    </Card>
+      </Card>
+    </div>
   );
 };
 
