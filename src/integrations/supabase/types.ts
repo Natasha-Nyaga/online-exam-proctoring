@@ -79,6 +79,110 @@ export type Database = {
           },
         ]
       }
+      behavioral_metrics: {
+        Row: {
+          acceleration: number | null
+          calibration_session_id: string
+          click_frequency: number | null
+          click_positions: Json | null
+          created_at: string | null
+          cursor_positions: Json | null
+          dwell_times: Json | null
+          error_rate: number | null
+          flight_times: Json | null
+          hover_times: Json | null
+          id: string
+          key_sequence: Json | null
+          metric_type: string
+          movement_speed: number | null
+          question_index: number
+          question_type: string
+          recorded_at: string | null
+          student_id: string
+          trajectory_smoothness: number | null
+          typing_speed: number | null
+        }
+        Insert: {
+          acceleration?: number | null
+          calibration_session_id: string
+          click_frequency?: number | null
+          click_positions?: Json | null
+          created_at?: string | null
+          cursor_positions?: Json | null
+          dwell_times?: Json | null
+          error_rate?: number | null
+          flight_times?: Json | null
+          hover_times?: Json | null
+          id?: string
+          key_sequence?: Json | null
+          metric_type: string
+          movement_speed?: number | null
+          question_index: number
+          question_type: string
+          recorded_at?: string | null
+          student_id: string
+          trajectory_smoothness?: number | null
+          typing_speed?: number | null
+        }
+        Update: {
+          acceleration?: number | null
+          calibration_session_id?: string
+          click_frequency?: number | null
+          click_positions?: Json | null
+          created_at?: string | null
+          cursor_positions?: Json | null
+          dwell_times?: Json | null
+          error_rate?: number | null
+          flight_times?: Json | null
+          hover_times?: Json | null
+          id?: string
+          key_sequence?: Json | null
+          metric_type?: string
+          movement_speed?: number | null
+          question_index?: number
+          question_type?: string
+          recorded_at?: string | null
+          student_id?: string
+          trajectory_smoothness?: number | null
+          typing_speed?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "behavioral_metrics_calibration_session_id_fkey"
+            columns: ["calibration_session_id"]
+            isOneToOne: false
+            referencedRelation: "calibration_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calibration_sessions: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          id: string
+          started_at: string | null
+          status: string
+          student_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string
+          student_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          id?: string
+          started_at?: string | null
+          status?: string
+          student_id?: string
+        }
+        Relationships: []
+      }
       cheating_incidents: {
         Row: {
           description: string | null
