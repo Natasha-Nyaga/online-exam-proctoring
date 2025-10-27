@@ -220,11 +220,13 @@ const CreateExamForm = () => {
                           <SelectValue placeholder="Select correct answer" />
                         </SelectTrigger>
                         <SelectContent>
-                          {question.options.map((option, oIndex) => (
-                            <SelectItem key={oIndex} value={option}>
-                              {option || `Option ${oIndex + 1}`}
-                            </SelectItem>
-                          ))}
+                          {question.options
+                            .filter((option) => option !== "")
+                            .map((option, oIndex) => (
+                              <SelectItem key={oIndex} value={option}>
+                                {option}
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                     </div>
