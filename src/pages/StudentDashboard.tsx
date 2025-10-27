@@ -67,7 +67,7 @@ const StudentDashboard = () => {
   };
 
   const startExam = (examId: string) => {
-    navigate(`/exam/${examId}`);
+    navigate(`/calibration?examId=${examId}`);
   };
 
   return (

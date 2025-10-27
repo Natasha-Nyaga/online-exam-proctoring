@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -59,6 +59,8 @@ const CALIBRATION_DURATION = 10 * 60; // 10 minutes in seconds
 
 const CalibrationPage = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const examId = searchParams.get("examId");
   const { toast } = useToast();
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<number, string>>({});
@@ -199,7 +201,11 @@ const CalibrationPage = () => {
         description: "Your behavioral baseline has been recorded.",
       });
 
-      navigate("/student-dashboard");
+      if (examId) {
+        navigate(`/exam/${examId}`);
+      } else {
+        navigate("/student-dashboard");
+      }
     } catch (error) {
       toast({
         title: "Error",
