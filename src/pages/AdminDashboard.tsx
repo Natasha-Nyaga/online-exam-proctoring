@@ -22,13 +22,21 @@ const AdminDashboard = () => {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("name")
+        .select("name, role")
         .eq("id", session.user.id)
         .single();
 
-      if (profile) {
-        setAdminName(profile.name);
+      if (!profile || profile.role !== "admin") {
+        toast({
+          title: "Access Denied",
+          description: "You do not have permission to access the instructor dashboard.",
+          variant: "destructive",
+        });
+        navigate("/student-dashboard");
+        return;
       }
+
+      setAdminName(profile.name);
     };
 
     checkAuth();

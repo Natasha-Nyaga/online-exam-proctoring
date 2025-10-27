@@ -15,14 +15,9 @@ const StudentLogin = () => {
   const [password, setPassword] = useState("");
 
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        navigate("/student-dashboard");
-      }
-    };
-    checkUser();
-  }, [navigate]);
+    // On mount, always sign out to force credential input
+    supabase.auth.signOut();
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

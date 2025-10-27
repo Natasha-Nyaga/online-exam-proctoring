@@ -1,3 +1,12 @@
+// Type guard for a valid profile object
+function isValidProfile(p: unknown): p is { name: string } {
+  return (
+    typeof p === "object" &&
+    p !== null &&
+    "name" in p &&
+    typeof (p as any).name === "string"
+  );
+}
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -13,10 +22,8 @@ interface ExamSession {
   completed_at: string | null;
   status: string;
   exams: { title: string };
-  students: { 
-    student_id: string;
-    profiles: { name: string };
-  };
+  student_id: string;
+  profiles?: { name: string };
   incident_count?: number;
 }
 
@@ -39,10 +46,8 @@ const ExamSessionsList = () => {
           completed_at,
           status,
           exams (title),
-          students (
-            student_id,
-            profiles (name)
-          )
+          student_id,
+          profiles:student_id (name)
         `)
         .order("started_at", { ascending: false });
 
@@ -55,8 +60,14 @@ const ExamSessionsList = () => {
             .from("cheating_incidents")
             .select("*", { count: "exact", head: true })
             .eq("session_id", session.id);
-          
-          return { ...session, incident_count: count || 0 };
+
+          // Ensure profiles is always an object with a name property
+          let fixedProfiles = { name: "Unknown" };
+          if (isValidProfile(session.profiles)) {
+            fixedProfiles = session.profiles;
+          }
+
+          return { ...session, profiles: fixedProfiles, incident_count: count || 0 };
         })
       );
 
@@ -155,10 +166,12 @@ const ExamSessionsList = () => {
                 {sessions.map((session) => (
                   <TableRow key={session.id}>
                     <TableCell className="font-medium">
-                      {session.students.profiles.name}
+                      {isValidProfile(session.profiles)
+                        ? session.profiles.name
+                        : "Unknown"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {session.students.student_id}
+                      {session.student_id}
                     </TableCell>
                     <TableCell>{session.exams.title}</TableCell>
                     <TableCell className="text-sm">
