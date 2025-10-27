@@ -13,6 +13,7 @@ import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
 import ExamPage from "./pages/ExamPage";
 import ExamComplete from "./pages/ExamComplete";
+import CalibrationPage from "./pages/CalibrationPage";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const App = () => (
           <Route path="/admin-dashboard" element={<AdminDashboard />} />
           <Route path="/exam/:examId" element={<ExamPage />} />
           <Route path="/exam-complete" element={<ExamComplete />} />
+          <Route path="/calibration" element={<CalibrationPage />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
