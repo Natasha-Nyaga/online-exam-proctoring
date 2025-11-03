@@ -7,7 +7,7 @@ const ExamComplete = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted p-4">
+  <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md text-center">
         <CardHeader>
           <div className="mx-auto mb-4">

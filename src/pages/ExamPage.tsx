@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
+import ExamMonitor from "../components/ExamMonitor";
 
 interface Question {
   id: string;
@@ -169,6 +170,9 @@ const ExamPage = () => {
         </div>
         <span className="font-medium">Monitoring in Progress</span>
       </div>
+
+      {/* Behavior monitoring component */}
+      <ExamMonitor />
 
       {/* Header */}
       <header className="border-b bg-card">

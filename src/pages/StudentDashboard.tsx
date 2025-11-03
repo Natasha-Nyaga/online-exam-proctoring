@@ -71,14 +71,14 @@ const StudentDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
+  <div className="min-h-screen bg-background">
+      <header className="border-b bg-primary">
         <div className="container mx-auto px-4 py-4 flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold">Student Dashboard</h1>
-            <p className="text-muted-foreground">Welcome, {studentName}</p>
+            <h1 className="text-2xl font-bold text-black">Student Dashboard</h1>
+            <p className="text-black/80">Welcome, {studentName}</p>
           </div>
-          <Button onClick={handleLogout} variant="outline">
+          <Button onClick={handleLogout} className="bg-white text-primary font-semibold hover:bg-primary-foreground hover:text-white border-none">
             Logout
           </Button>
         </div>

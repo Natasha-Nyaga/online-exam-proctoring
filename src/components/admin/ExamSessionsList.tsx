@@ -47,24 +47,39 @@ const ExamSessionsList = () => {
           status,
           exams (title),
           student_id,
-          profiles:student_id (name)
+          students:student_id (
+            profiles:id (name)
+          )
         `)
         .order("started_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error("Supabase error:", error);
+        throw error;
+      }
+      if (!sessionsData) {
+        console.error("No sessions data returned from Supabase.");
+      }
 
       // Fetch incident counts for each session
       const sessionsWithCounts = await Promise.all(
         (sessionsData || []).map(async (session) => {
-          const { count } = await supabase
+          const { count, error: incidentError } = await supabase
             .from("cheating_incidents")
             .select("*", { count: "exact", head: true })
             .eq("session_id", session.id);
+          if (incidentError) {
+            console.error("Incident count error for session", session.id, incidentError);
+          }
 
-          // Ensure profiles is always an object with a name property
+          // Get student name from nested join
           let fixedProfiles = { name: "Unknown" };
-          if (isValidProfile(session.profiles)) {
-            fixedProfiles = session.profiles;
+          if (
+            session.students &&
+            session.students.profiles &&
+            typeof session.students.profiles.name === "string"
+          ) {
+            fixedProfiles = { name: session.students.profiles.name };
           }
 
           return { ...session, profiles: fixedProfiles, incident_count: count || 0 };
@@ -73,9 +88,10 @@ const ExamSessionsList = () => {
 
       setSessions(sessionsWithCounts);
     } catch (error: any) {
+      console.error("FetchSessions error:", error);
       toast({
         title: "Error",
-        description: "Failed to load exam sessions",
+        description: error.message || "Failed to load exam sessions",
         variant: "destructive",
       });
     } finally {

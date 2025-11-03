@@ -224,7 +224,7 @@ const CalibrationPage = () => {
   const answeredCount = Object.keys(answers).length;
 
   return (
-    <div className="min-h-screen bg-background">
+  <div className="min-h-screen bg-background">
       {/* Monitoring Notice */}
       <div className="bg-primary text-primary-foreground px-4 py-2 flex items-center justify-center gap-2">
         <div className="flex items-center gap-2 animate-pulse">
