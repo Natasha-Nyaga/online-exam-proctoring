@@ -92,7 +92,7 @@ const ExamSessionsList = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to load exam sessions",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     } finally {
       setLoading(false);
@@ -133,12 +133,13 @@ const ExamSessionsList = () => {
       toast({
         title: "Success",
         description: "Report downloaded successfully",
+        className: "bg-success text-success-foreground",
       });
     } catch (error: any) {
       toast({
         title: "Error",
         description: "Failed to download report",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     }
   };

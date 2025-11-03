@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, Upload } from "lucide-react";
 
 interface Question {
   question_text: string;
@@ -26,6 +26,33 @@ const CreateExamForm = () => {
   const [questions, setQuestions] = useState<Question[]>([
     { question_text: "", question_type: "mcq", options: ["", "", "", ""], correct_answer: "", points: 1 },
   ]);
+
+  const handlePDFUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || file.type !== "application/pdf") {
+      toast({
+        title: "Invalid file",
+        description: "Please upload a PDF file",
+        className: "bg-error text-error-foreground",
+      });
+      return;
+    }
+
+    try {
+      // For now, show a message that PDF parsing will be implemented
+      toast({
+        title: "PDF Upload",
+        description: "PDF parsing feature coming soon. Please enter questions manually for now.",
+        className: "bg-success text-success-foreground",
+      });
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to process PDF",
+        className: "bg-error text-error-foreground",
+      });
+    }
+  };
 
   const addQuestion = () => {
     setQuestions([
@@ -92,6 +119,7 @@ const CreateExamForm = () => {
       toast({
         title: "Success!",
         description: "Exam created successfully.",
+        className: "bg-success text-success-foreground",
       });
 
       // Reset form
@@ -105,7 +133,7 @@ const CreateExamForm = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to create exam",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     } finally {
       setLoading(false);
@@ -123,6 +151,23 @@ const CreateExamForm = () => {
         </CardHeader>
         <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="pdf-upload">Quick Upload (Optional)</Label>
+            <div className="flex items-center gap-4">
+              <Input
+                id="pdf-upload"
+                type="file"
+                accept=".pdf"
+                onChange={handlePDFUpload}
+                className="cursor-pointer"
+              />
+              <Upload className="h-5 w-5 text-muted-foreground" />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Upload a PDF with questions to auto-populate (Coming soon - manual entry required for now)
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label htmlFor="title">Exam Title</Label>
             <Input

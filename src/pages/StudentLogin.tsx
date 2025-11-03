@@ -46,6 +46,7 @@ const StudentLogin = () => {
       toast({
         title: "Welcome back!",
         description: "Logged in successfully.",
+        className: "bg-success text-success-foreground",
       });
       
       navigate("/student-dashboard");
@@ -53,7 +54,7 @@ const StudentLogin = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to log in",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     } finally {
       setLoading(false);

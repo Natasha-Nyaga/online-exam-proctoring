@@ -8,38 +8,41 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-  --background: 40 40% 96%; /* #FFF7ED (creamish white) */
-    --foreground: 222.2 84% 4.9%;
+    --background: 0 0% 98%; /* Clean white background */
+    --foreground: 222 47% 11%; /* Deep charcoal text */
 
-    --card: 0 0% 100%; /* #FFFFFF */
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%; /* Pure white cards */
+    --card-foreground: 222 47% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 28 96% 56%; /* #FB923C (orange accent) */
-    --primary-foreground: 210 40% 98%;
+    --primary: 24 74% 50%; /* Executive orange #D97232 */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 28 96% 60%; /* #F97316 (orange accent alt) */
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 215 25% 27%; /* Professional navy #344156 */
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 220 20% 98%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 210 20% 96%; /* Subtle gray */
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 28 96% 56%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 24 74% 50%;
+    --accent-foreground: 0 0% 100%;
 
-    --success: 160 72% 41%; /* #10B981 */
-    --error: 0 84% 56%; /* #EF4444 */
+    --success: 142 71% 45%; /* Vibrant green #22C55E */
+    --success-foreground: 0 0% 100%;
+    
+    --error: 0 72% 51%; /* Bold red #DC2626 */
+    --error-foreground: 0 0% 100%;
 
-    --destructive: 0 84% 56%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 24 74% 50%;
 
-    --radius: 0.75rem;
+    --radius: 0.5rem;
 
     --sidebar-background: 220 20% 98%;
     --sidebar-foreground: 240 5.3% 26.1%;
@@ -54,35 +57,38 @@ All colors MUST be HSL.
   }
 
   .dark {
-    --background: 0 0% 0%; /* #000000 */
-    --foreground: 210 40% 98%;
+    --background: 222 47% 11%; /* Deep charcoal */
+    --foreground: 0 0% 98%;
 
-    --card: 220 14% 16%; /* #1F2937 */
-    --card-foreground: 210 40% 98%;
+    --card: 215 25% 18%; /* Dark navy card */
+    --card-foreground: 0 0% 98%;
 
-    --popover: 222.2 84% 7%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 215 25% 18%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 28 96% 60%; /* #FB923C (brighter orange) */
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 24 74% 50%; /* Executive orange */
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 222.2 84% 7%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 215 25% 27%; /* Navy */
+    --secondary-foreground: 0 0% 100%;
 
-    --muted: 222.2 84% 7%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 215 25% 18%;
+    --muted-foreground: 215 20% 65%;
 
-    --accent: 28 96% 60%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 24 74% 50%;
+    --accent-foreground: 0 0% 100%;
 
-    --success: 160 72% 41%; /* #10B981 */
-    --error: 0 84% 56%; /* #EF4444 */
+    --success: 142 71% 45%; /* Vibrant green */
+    --success-foreground: 0 0% 100%;
+    
+    --error: 0 72% 51%; /* Bold red */
+    --error-foreground: 0 0% 100%;
 
-    --destructive: 0 84% 56%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 14% 16%;
-    --input: 220 14% 16%;
-    --ring: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 215 25% 27%;
+    --input: 215 25% 27%;
+    --ring: 24 74% 50%;
 
     --radius: 0.75rem;
 

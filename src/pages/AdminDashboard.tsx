@@ -30,7 +30,7 @@ const AdminDashboard = () => {
         toast({
           title: "Access Denied",
           description: "You do not have permission to access the instructor dashboard.",
-          variant: "destructive",
+          className: "bg-error text-error-foreground",
         });
         navigate("/student-dashboard");
         return;

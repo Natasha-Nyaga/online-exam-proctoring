@@ -39,6 +39,15 @@ const ExamPage = () => {
         return;
       }
 
+      // Check for existing paused session
+      const { data: existingSession } = await supabase
+        .from("exam_sessions")
+        .select("*")
+        .eq("exam_id", examId)
+        .eq("student_id", session.user.id)
+        .eq("status", "in_progress")
+        .single();
+
       // Get exam details
       const { data: examData } = await supabase
         .from("exams")
@@ -48,7 +57,18 @@ const ExamPage = () => {
 
       if (examData) {
         setExamTitle(examData.title);
-        setTimeLeft(examData.duration_minutes * 60);
+        
+        // Calculate remaining time if resuming
+        if (existingSession) {
+          const elapsedMinutes = Math.floor(
+            (Date.now() - new Date(existingSession.started_at).getTime()) / 60000
+          );
+          const remainingMinutes = examData.duration_minutes - elapsedMinutes;
+          setTimeLeft(Math.max(0, remainingMinutes * 60));
+          setSessionId(existingSession.id);
+        } else {
+          setTimeLeft(examData.duration_minutes * 60);
+        }
       }
 
       // Get questions
@@ -62,19 +82,35 @@ const ExamPage = () => {
         setQuestions(questionsData);
       }
 
-      // Create exam session
-      const { data: sessionData } = await supabase
-        .from("exam_sessions")
-        .insert({
-          exam_id: examId,
-          student_id: session.user.id,
-          status: "in_progress",
-        })
-        .select()
-        .single();
+      // Create or use existing exam session
+      if (!existingSession) {
+        const { data: sessionData } = await supabase
+          .from("exam_sessions")
+          .insert({
+            exam_id: examId,
+            student_id: session.user.id,
+            status: "in_progress",
+          })
+          .select()
+          .single();
 
-      if (sessionData) {
-        setSessionId(sessionData.id);
+        if (sessionData) {
+          setSessionId(sessionData.id);
+        }
+      } else {
+        // Load previous answers
+        const { data: previousAnswers } = await supabase
+          .from("answers")
+          .select("question_id, answer_text")
+          .eq("session_id", existingSession.id);
+
+        if (previousAnswers) {
+          const answersMap = previousAnswers.reduce((acc, ans) => {
+            acc[ans.question_id] = ans.answer_text;
+            return acc;
+          }, {} as Record<string, string>);
+          setAnswers(answersMap);
+        }
       }
 
       setLoading(false);
@@ -140,6 +176,7 @@ const ExamPage = () => {
       toast({
         title: "Exam submitted!",
         description: "Your answers have been recorded.",
+        className: "bg-success text-success-foreground",
       });
 
       navigate("/exam-complete");
@@ -147,7 +184,7 @@ const ExamPage = () => {
       toast({
         title: "Error",
         description: "Failed to submit exam",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     }
   };
@@ -163,9 +200,9 @@ const ExamPage = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Monitoring Notice */}
-      <div className="bg-destructive text-destructive-foreground px-4 py-2 flex items-center justify-center gap-2">
+      <div className="bg-error text-error-foreground px-4 py-2 flex items-center justify-center gap-2">
         <div className="flex items-center gap-2 animate-pulse">
-          <div className="h-3 w-3 rounded-full bg-destructive-foreground" />
+          <div className="h-3 w-3 rounded-full bg-error-foreground" />
           <AlertCircle className="h-4 w-4" />
         </div>
         <span className="font-medium">Monitoring in Progress</span>
@@ -175,11 +212,11 @@ const ExamPage = () => {
       <ExamMonitor />
 
       {/* Header */}
-      <header className="border-b bg-card">
+      <header className="border-b bg-secondary shadow-sm">
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center mb-4">
-            <h1 className="text-xl font-bold">{examTitle}</h1>
-            <div className="flex items-center gap-2 text-lg font-semibold">
+            <h1 className="text-xl font-bold text-secondary-foreground">{examTitle}</h1>
+            <div className="flex items-center gap-2 text-lg font-semibold text-secondary-foreground">
               <Clock className="h-5 w-5" />
               <span>{formatTime(timeLeft)}</span>
             </div>

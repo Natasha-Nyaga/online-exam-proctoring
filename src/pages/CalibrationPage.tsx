@@ -199,6 +199,7 @@ const CalibrationPage = () => {
       toast({
         title: "Calibration completed!",
         description: "Your behavioral baseline has been recorded.",
+        className: "bg-success text-success-foreground",
       });
 
       if (examId) {
@@ -210,7 +211,7 @@ const CalibrationPage = () => {
       toast({
         title: "Error",
         description: "Failed to complete calibration",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     }
   };

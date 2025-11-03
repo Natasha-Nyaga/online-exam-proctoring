@@ -54,6 +54,7 @@ const StudentSignup = () => {
       toast({
         title: "Account created successfully!",
         description: "You can now log in to take exams.",
+        className: "bg-success text-success-foreground",
       });
       
       navigate("/student-login");
@@ -61,7 +62,7 @@ const StudentSignup = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to create account",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     } finally {
       setLoading(false);

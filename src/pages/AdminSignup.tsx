@@ -51,6 +51,7 @@ const AdminSignup = () => {
       toast({
         title: "Admin account created!",
         description: "You can now log in to manage exams.",
+        className: "bg-success text-success-foreground",
       });
       
       navigate("/admin-login");
@@ -58,7 +59,7 @@ const AdminSignup = () => {
       toast({
         title: "Error",
         description: error.message || "Failed to create account",
-        variant: "destructive",
+        className: "bg-error text-error-foreground",
       });
     } finally {
       setLoading(false);
