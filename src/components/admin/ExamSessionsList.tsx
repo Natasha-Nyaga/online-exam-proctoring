@@ -24,6 +24,9 @@ interface ExamSession {
   status: string;
   exams: { title: string };
   student_id: string;
+  students?: {
+    profiles?: { name: string };
+  };
   profiles?: { name: string };
   incident_count?: number;
 }
@@ -48,7 +51,9 @@ const ExamSessionsList = () => {
           status,
           exams (title),
           student_id,
-          profiles:student_id (name)
+          students!student_id (
+            profiles (name)
+          )
         `)
         .order("started_at", { ascending: false });
 
@@ -71,14 +76,12 @@ const ExamSessionsList = () => {
             console.error("Incident count error for session", session.id, incidentError);
           }
 
-          const profiles = session.profiles ?? { name: "Unknown" };
-          const profileName = (typeof profiles === 'object' && 'name' in profiles)
-            ? profiles 
-            : { name: "Unknown" };
+          // Extract student name from nested join
+          const studentName = session.students?.profiles?.name || "Unknown";
 
           return { 
             ...session, 
-            profiles: profileName, 
+            profiles: { name: studentName }, 
             incident_count: count || 0 
           };
         })
