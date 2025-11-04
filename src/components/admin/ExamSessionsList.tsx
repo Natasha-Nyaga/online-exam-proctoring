@@ -47,9 +47,7 @@ const ExamSessionsList = () => {
           status,
           exams (title),
           student_id,
-          students:student_id (
-            profiles:id (name)
-          )
+          profiles:student_id (name)
         `)
         .order("started_at", { ascending: false });
 
@@ -72,17 +70,16 @@ const ExamSessionsList = () => {
             console.error("Incident count error for session", session.id, incidentError);
           }
 
-          // Get student name from nested join
-          let fixedProfiles = { name: "Unknown" };
-          if (
-            session.students &&
-            session.students.profiles &&
-            typeof session.students.profiles.name === "string"
-          ) {
-            fixedProfiles = { name: session.students.profiles.name };
-          }
+          const profiles = session.profiles ?? { name: "Unknown" };
+          const profileName = (typeof profiles === 'object' && 'name' in profiles)
+            ? profiles 
+            : { name: "Unknown" };
 
-          return { ...session, profiles: fixedProfiles, incident_count: count || 0 };
+          return { 
+            ...session, 
+            profiles: profileName, 
+            incident_count: count || 0 
+          };
         })
       );
 
