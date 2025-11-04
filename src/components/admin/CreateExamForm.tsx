@@ -39,28 +39,114 @@ const CreateExamForm = () => {
     }
 
     try {
-      toast({
-        title: "Processing PDF",
-        description: "Extracting questions from PDF...",
-      });
+      toast({ title: "Processing PDF", description: "Starting PDF upload..." });
+      console.log("[PDF Debug] Starting upload");
 
-      const pdfjsLib = await import("pdfjs-dist");
-      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      
-      let extractedText = "";
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const pageText = textContent.items.map((item: any) => item.str).join(" ");
-        extractedText += pageText + "\n";
+      let pdfjsLib;
+      try {
+        pdfjsLib = await import("pdfjs-dist");
+        console.log("[PDF Debug] pdfjs-dist imported", pdfjsLib);
+        toast({ title: "PDF.js imported", description: "Worker setup..." });
+      } catch (err) {
+        console.error("[PDF Debug] Failed to import pdfjs-dist", err);
+        toast({
+          title: "PDF.js import error",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
       }
 
-      // Parse questions from text (basic implementation)
-      const parsedQuestions = parseQuestionsFromText(extractedText);
-      
+      try {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.js";
+        console.log("[PDF Debug] Worker src set");
+  toast({ title: "Worker src set", description: "/pdf.worker.js" });
+      } catch (err) {
+        console.error("[PDF Debug] Failed to set workerSrc", err);
+        toast({
+          title: "Worker src error",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
+      }
+
+      let arrayBuffer;
+      try {
+        arrayBuffer = await file.arrayBuffer();
+        console.log("[PDF Debug] ArrayBuffer loaded", arrayBuffer.byteLength);
+        toast({ title: "PDF loaded", description: "Parsing PDF..." });
+      } catch (err) {
+        console.error("[PDF Debug] Failed to load ArrayBuffer", err);
+        toast({
+          title: "ArrayBuffer error",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
+      }
+
+      let pdf;
+      try {
+        // Add a timeout to catch silent worker failures
+        const pdfPromise = pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("PDF.js worker did not respond (timeout). Check workerSrc and network).")), 10000)
+        );
+        pdf = await Promise.race([pdfPromise, timeoutPromise]);
+        console.log("[PDF Debug] PDF loaded", pdf);
+        toast({ title: "PDF loaded", description: `Pages: ${pdf.numPages}` });
+      } catch (err) {
+        console.error("[PDF Debug] PDF.js getDocument error or timeout", err);
+        toast({
+          title: "PDF.js getDocument error or timeout",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
+      }
+
+      let extractedText = "";
+      try {
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          console.log(`[PDF Debug] Page ${i} loaded`, page);
+          toast({ title: `Page ${i} loaded`, description: `Extracting text...` });
+          const textContent = await page.getTextContent();
+          console.log(`[PDF Debug] Page ${i} textContent`, textContent);
+          const pageText = textContent.items.map((item: any) => item.str).join(" ");
+          extractedText += pageText + "\n";
+        }
+        console.log("[PDF Extracted Text]", extractedText);
+        toast({
+          title: "PDF Extracted Text (debug)",
+          description: extractedText.slice(0, 400) + (extractedText.length > 400 ? "..." : ""),
+          className: "bg-muted text-muted-foreground",
+        });
+      } catch (err) {
+        console.error("[PDF Debug] Error extracting text from PDF", err);
+        toast({
+          title: "Text extraction error",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
+      }
+
+      let parsedQuestions = [];
+      try {
+        parsedQuestions = parseQuestionsFromText(extractedText);
+        console.log("[PDF Debug] Parsed questions", parsedQuestions);
+      } catch (err) {
+        console.error("[PDF Debug] Error parsing questions from text", err);
+        toast({
+          title: "Question parsing error",
+          description: err?.message || String(err),
+          className: "bg-error text-error-foreground",
+        });
+        return;
+      }
+
       if (parsedQuestions.length > 0) {
         setQuestions(parsedQuestions);
         toast({
@@ -76,10 +162,10 @@ const CreateExamForm = () => {
         });
       }
     } catch (error) {
-      console.error("PDF parsing error:", error);
+      console.error("[PDF Debug] PDF parsing error:", error);
       toast({
         title: "Error",
-        description: "Failed to process PDF. Please add questions manually.",
+        description: error?.message || "Failed to process PDF. Please add questions manually.",
         className: "bg-error text-error-foreground",
       });
     }
@@ -87,48 +173,79 @@ const CreateExamForm = () => {
 
   const parseQuestionsFromText = (text: string): Question[] => {
     const questions: Question[] = [];
-    const lines = text.split("\n").filter(line => line.trim());
-    
+    const lines = text.replace(/\r/g, "").split("\n").map(l => l.trim()).filter(Boolean);
     let currentQuestion: Partial<Question> | null = null;
-    
+    let inOptions = false;
+    let isEssaySection = false;
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      
+      const line = lines[i];
+      if (/^Essay Questions$/i.test(line)) {
+        isEssaySection = true;
+        continue;
+      }
       // Detect question (starts with number followed by period or parenthesis)
-      if (/^\d+[\.)]\s/.test(line)) {
+      if (/^\d+[\.)]?\s/.test(line)) {
         if (currentQuestion && currentQuestion.question_text) {
+          // If no options, treat as essay
+          if (!currentQuestion.options || currentQuestion.options.length < 2) {
+            currentQuestion.question_type = "essay";
+            currentQuestion.options = ["", "", "", ""];
+          }
           questions.push(currentQuestion as Question);
         }
         currentQuestion = {
-          question_text: line.replace(/^\d+[\.)]\s/, ""),
-          question_type: "mcq",
+          question_text: line.replace(/^\d+[\.)]?\s/, ""),
+          question_type: isEssaySection ? "essay" : "mcq",
           options: [],
+          correct_answer: "",
           points: 1,
         };
+        inOptions = false;
       }
-      // Detect options (starts with letter followed by period or parenthesis)
-      else if (currentQuestion && /^[a-dA-D][\.)]\s/.test(line)) {
-        const option = line.replace(/^[a-dA-D][\.)]\s/, "");
+      // MCQ options: A. Option, B. Option, etc.
+      else if (currentQuestion && !isEssaySection && /^[A-E][.]\s/.test(line)) {
+        const option = line.replace(/^[A-E][.]\s/, "").trim();
         currentQuestion.options = currentQuestion.options || [];
         currentQuestion.options.push(option);
+        inOptions = true;
       }
-      // Continue current question text
-      else if (currentQuestion && line && !currentQuestion.options?.length) {
+      // Detect correct answer for MCQ: 'Answer: B. Stack'
+      else if (currentQuestion && /^Answer:\s*/i.test(line)) {
+        const answerText = line.replace(/^Answer:\s*/i, "").trim();
+        // Try to extract the letter and match to option
+        const match = answerText.match(/^([A-E])[.]\s*(.*)/);
+        if (match && currentQuestion.options && currentQuestion.options.length) {
+          const idx = match[1].charCodeAt(0) - 65;
+          currentQuestion.correct_answer = currentQuestion.options[idx] || "";
+        } else {
+          currentQuestion.correct_answer = answerText;
+        }
+      }
+      // Essay answer: 'Answer: ...' (full text)
+      else if (currentQuestion && isEssaySection && /^Answer:/i.test(line)) {
+        currentQuestion.correct_answer = line.replace(/^Answer:/i, "").trim();
+      }
+      // Continue current question text (if not in options)
+      else if (currentQuestion && !inOptions && line && !/^Explanation:/i.test(line)) {
         currentQuestion.question_text += " " + line;
       }
+      // Optionally, skip explanations
     }
-    
     // Add last question
     if (currentQuestion && currentQuestion.question_text) {
+      if (!currentQuestion.options || currentQuestion.options.length < 2) {
+        currentQuestion.question_type = "essay";
+        currentQuestion.options = ["", "", "", ""];
+      }
       questions.push(currentQuestion as Question);
     }
-    
-    // Ensure all questions have at least 4 options
+    // Ensure all MCQs have at least 4 options
     return questions.map(q => ({
       ...q,
-      options: q.options && q.options.length >= 2 
-        ? [...q.options, ...Array(Math.max(0, 4 - q.options.length)).fill("")] 
+      options: q.options && q.options.length >= 2
+        ? [...q.options, ...Array(Math.max(0, 4 - q.options.length)).fill("")]
         : ["", "", "", ""],
+      correct_answer: q.correct_answer || "",
     }));
   };
 

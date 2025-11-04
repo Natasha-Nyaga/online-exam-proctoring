@@ -1,6 +1,7 @@
 
 import { useState } from "react";
 import { Sun } from "lucide-react";
+import MLMonitorExample from "./components/MLMonitorExample";
 
 const queryClient = new QueryClient();
 import { Toaster } from "@/components/ui/toaster";
@@ -59,6 +60,7 @@ function App() {
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </BrowserRouter>
+            <MLMonitorExample />
           </main>
           {/* Floating dark mode toggle button */}
           <button
