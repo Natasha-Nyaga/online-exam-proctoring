@@ -1,3 +1,12 @@
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { Download, Eye } from "lucide-react";
+
 // Type guard for a valid profile object
 function isValidProfile(p: unknown): p is { name: string } {
   return (
@@ -7,14 +16,6 @@ function isValidProfile(p: unknown): p is { name: string } {
     typeof (p as any).name === "string"
   );
 }
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { useToast } from "@/hooks/use-toast";
-import { Download, Eye } from "lucide-react";
 
 interface ExamSession {
   id: string;
