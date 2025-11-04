@@ -39,19 +39,97 @@ const CreateExamForm = () => {
     }
 
     try {
-      // For now, show a message that PDF parsing will be implemented
       toast({
-        title: "PDF Upload",
-        description: "PDF parsing feature coming soon. Please enter questions manually for now.",
-        className: "bg-success text-success-foreground",
+        title: "Processing PDF",
+        description: "Extracting questions from PDF...",
       });
+
+      const pdfjsLib = await import("pdfjs-dist");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      let extractedText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map((item: any) => item.str).join(" ");
+        extractedText += pageText + "\n";
+      }
+
+      // Parse questions from text (basic implementation)
+      const parsedQuestions = parseQuestionsFromText(extractedText);
+      
+      if (parsedQuestions.length > 0) {
+        setQuestions(parsedQuestions);
+        toast({
+          title: "Success!",
+          description: `Extracted ${parsedQuestions.length} questions from PDF`,
+          className: "bg-success text-success-foreground",
+        });
+      } else {
+        toast({
+          title: "No questions found",
+          description: "Could not extract questions. Please add manually.",
+          className: "bg-error text-error-foreground",
+        });
+      }
     } catch (error) {
+      console.error("PDF parsing error:", error);
       toast({
         title: "Error",
-        description: "Failed to process PDF",
+        description: "Failed to process PDF. Please add questions manually.",
         className: "bg-error text-error-foreground",
       });
     }
+  };
+
+  const parseQuestionsFromText = (text: string): Question[] => {
+    const questions: Question[] = [];
+    const lines = text.split("\n").filter(line => line.trim());
+    
+    let currentQuestion: Partial<Question> | null = null;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      // Detect question (starts with number followed by period or parenthesis)
+      if (/^\d+[\.)]\s/.test(line)) {
+        if (currentQuestion && currentQuestion.question_text) {
+          questions.push(currentQuestion as Question);
+        }
+        currentQuestion = {
+          question_text: line.replace(/^\d+[\.)]\s/, ""),
+          question_type: "mcq",
+          options: [],
+          points: 1,
+        };
+      }
+      // Detect options (starts with letter followed by period or parenthesis)
+      else if (currentQuestion && /^[a-dA-D][\.)]\s/.test(line)) {
+        const option = line.replace(/^[a-dA-D][\.)]\s/, "");
+        currentQuestion.options = currentQuestion.options || [];
+        currentQuestion.options.push(option);
+      }
+      // Continue current question text
+      else if (currentQuestion && line && !currentQuestion.options?.length) {
+        currentQuestion.question_text += " " + line;
+      }
+    }
+    
+    // Add last question
+    if (currentQuestion && currentQuestion.question_text) {
+      questions.push(currentQuestion as Question);
+    }
+    
+    // Ensure all questions have at least 4 options
+    return questions.map(q => ({
+      ...q,
+      options: q.options && q.options.length >= 2 
+        ? [...q.options, ...Array(Math.max(0, 4 - q.options.length)).fill("")] 
+        : ["", "", "", ""],
+    }));
   };
 
   const addQuestion = () => {
@@ -164,7 +242,7 @@ const CreateExamForm = () => {
               <Upload className="h-5 w-5 text-muted-foreground" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Upload a PDF with questions to auto-populate (Coming soon - manual entry required for now)
+              Upload a PDF with questions to automatically populate the form. Supports standard exam formats.
             </p>
           </div>
 

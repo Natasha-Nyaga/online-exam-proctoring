@@ -8,77 +8,28 @@ All colors MUST be HSL.
 
 @layer base {
   :root {
-    --background: 0 0% 98%; /* Clean white background */
-    --foreground: 222 47% 11%; /* Deep charcoal text */
+    --background: 45 33% 94%; /* Creamish background */
+    --foreground: 0 0% 10%; /* Deep black text */
 
     --card: 0 0% 100%; /* Pure white cards */
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 0 0% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
+    --popover-foreground: 0 0% 10%;
 
-    --primary: 24 74% 50%; /* Executive orange #D97232 */
+    --primary: 142 76% 36%; /* Forest green */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 215 25% 27%; /* Professional navy #344156 */
-    --secondary-foreground: 0 0% 100%;
+    --secondary: 0 0% 15%; /* Rich black */
+    --secondary-foreground: 45 33% 94%;
 
-    --muted: 210 20% 96%; /* Subtle gray */
-    --muted-foreground: 215 16% 47%;
+    --muted: 45 20% 88%; /* Light cream */
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 24 74% 50%;
+    --accent: 142 76% 36%; /* Forest green */
     --accent-foreground: 0 0% 100%;
 
-    --success: 142 71% 45%; /* Vibrant green #22C55E */
-    --success-foreground: 0 0% 100%;
-    
-    --error: 0 72% 51%; /* Bold red #DC2626 */
-    --error-foreground: 0 0% 100%;
-
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 24 74% 50%;
-
-    --radius: 0.5rem;
-
-    --sidebar-background: 220 20% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 28 96% 56%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 28 96% 60%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
-
-    --font-sans: 'Inter', 'Poppins', system-ui, sans-serif;
-  }
-
-  .dark {
-    --background: 222 47% 11%; /* Deep charcoal */
-    --foreground: 0 0% 98%;
-
-    --card: 215 25% 18%; /* Dark navy card */
-    --card-foreground: 0 0% 98%;
-
-    --popover: 215 25% 18%;
-    --popover-foreground: 0 0% 98%;
-
-    --primary: 24 74% 50%; /* Executive orange */
-    --primary-foreground: 0 0% 100%;
-
-    --secondary: 215 25% 27%; /* Navy */
-    --secondary-foreground: 0 0% 100%;
-
-    --muted: 215 25% 18%;
-    --muted-foreground: 215 20% 65%;
-
-    --accent: 24 74% 50%;
-    --accent-foreground: 0 0% 100%;
-
-    --success: 142 71% 45%; /* Vibrant green */
+    --success: 142 76% 36%; /* Forest green */
     --success-foreground: 0 0% 100%;
     
     --error: 0 72% 51%; /* Bold red */
@@ -86,20 +37,69 @@ All colors MUST be HSL.
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 215 25% 27%;
-    --input: 215 25% 27%;
-    --ring: 24 74% 50%;
+
+    --border: 45 20% 85%;
+    --input: 45 20% 85%;
+    --ring: 142 76% 36%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 15%;
+    --sidebar-foreground: 45 33% 94%;
+    --sidebar-primary: 142 76% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 142 60% 45%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 25%;
+    --sidebar-ring: 142 76% 36%;
+
+    --font-sans: 'Inter', 'Poppins', system-ui, sans-serif;
+  }
+
+  .dark {
+    --background: 0 0% 10%; /* Deep black */
+    --foreground: 45 33% 94%;
+
+    --card: 0 0% 15%; /* Rich black card */
+    --card-foreground: 45 33% 94%;
+
+    --popover: 0 0% 15%;
+    --popover-foreground: 45 33% 94%;
+
+    --primary: 142 76% 36%; /* Forest green */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 20%; /* Dark gray */
+    --secondary-foreground: 45 33% 94%;
+
+    --muted: 0 0% 20%;
+    --muted-foreground: 45 20% 70%;
+
+    --accent: 142 76% 36%;
+    --accent-foreground: 0 0% 100%;
+
+    --success: 142 76% 36%; /* Forest green */
+    --success-foreground: 0 0% 100%;
+    
+    --error: 0 72% 51%; /* Bold red */
+    --error-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 25%;
+    --input: 0 0% 25%;
+    --ring: 142 76% 36%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 222.2 84% 7%;
-    --sidebar-foreground: 210 40% 98%;
-    --sidebar-primary: 28 96% 60%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 28 96% 60%;
-    --sidebar-accent-foreground: 210 40% 98%;
-    --sidebar-border: 220 14% 16%;
-    --sidebar-ring: 210 40% 98%;
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 45 33% 94%;
+    --sidebar-primary: 142 76% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 142 60% 45%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 45 33% 94%;
 
     --font-sans: 'Inter', 'Poppins', system-ui, sans-serif;
   }

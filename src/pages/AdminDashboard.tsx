@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { useToast } from "@/hooks/use-toast";
 import CreateExamForm from "@/components/admin/CreateExamForm";
 import ExamSessionsList from "@/components/admin/ExamSessionsList";
@@ -11,6 +12,7 @@ const AdminDashboard = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [adminName, setAdminName] = useState("");
+  const [activeTab, setActiveTab] = useState("sessions");
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -48,54 +50,33 @@ const AdminDashboard = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-card shadow-sm">
-        <div className="container mx-auto px-4 py-6 flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Instructor Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Welcome back, {adminName || "Instructor"}</p>
-          </div>
-          <Button onClick={handleLogout} variant="outline" size="lg">
-            Logout
-          </Button>
+    <SidebarProvider>
+      <div className="min-h-screen flex w-full bg-background">
+        <AdminSidebar activeTab={activeTab} onTabChange={setActiveTab} />
+        
+        <div className="flex-1 flex flex-col">
+          <header className="border-b bg-secondary shadow-sm">
+            <div className="px-4 py-6 flex justify-between items-center">
+              <div className="flex items-center gap-4">
+                <SidebarTrigger />
+                <div>
+                  <h1 className="text-2xl font-bold text-secondary-foreground">Admin Dashboard</h1>
+                  <p className="text-secondary-foreground/80">Welcome back, {adminName || "Admin"}</p>
+                </div>
+              </div>
+              <Button onClick={handleLogout} variant="outline" className="bg-card hover:bg-secondary-foreground/10">
+                Logout
+              </Button>
+            </div>
+          </header>
+
+          <main className="flex-1 p-8 overflow-auto">
+            {activeTab === "sessions" && <ExamSessionsList />}
+            {activeTab === "create" && <CreateExamForm />}
+          </main>
         </div>
-      </header>
-
-      <main className="container mx-auto px-4 py-8">
-        <Tabs defaultValue="sessions" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-            <TabsTrigger value="sessions" className="text-base">
-              Flagged Sessions
-            </TabsTrigger>
-            <TabsTrigger value="create" className="text-base">
-              Upload Exam
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="sessions" className="space-y-4">
-            <div className="mb-6">
-              <h2 className="text-2xl font-semibold mb-2">Student Exam Sessions</h2>
-              <p className="text-muted-foreground">
-                View all completed exam sessions, cheating incidents, and download detailed reports
-              </p>
-            </div>
-            <ExamSessionsList />
-          </TabsContent>
-
-          <TabsContent value="create" className="space-y-4 min-h-[600px]">
-            <div className="mb-6">
-              <h2 className="text-2xl font-semibold mb-2">Upload New Examination</h2>
-              <p className="text-muted-foreground">
-                Create a new exam that will be visible to all students
-              </p>
-            </div>
-            <div className="w-full">
-              <CreateExamForm />
-            </div>
-          </TabsContent>
-        </Tabs>
-      </main>
-    </div>
+      </div>
+    </SidebarProvider>
   );
 };
 
