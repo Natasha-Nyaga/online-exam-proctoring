@@ -30,14 +30,17 @@ const ExamPage = () => {
   const [timeLeft, setTimeLeft] = useState(0);
   const [examTitle, setExamTitle] = useState("");
   const [loading, setLoading] = useState(true);
+  const [studentId, setStudentId] = useState<string>("");
 
   useEffect(() => {
     const initializeExam = async () => {
+      const { data: userData } = await supabase.auth.getUser();
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      if (!session || !userData?.user?.id) {
         navigate("/student-login");
         return;
       }
+      setStudentId(userData.user.id);
 
       // Check for existing paused session
       const { data: existingSession } = await supabase
@@ -115,7 +118,6 @@ const ExamPage = () => {
 
       setLoading(false);
     };
-
     initializeExam();
   }, [examId, navigate]);
 
@@ -208,8 +210,8 @@ const ExamPage = () => {
         <span className="font-medium">Monitoring in Progress</span>
       </div>
 
-      {/* Behavior monitoring component */}
-      <ExamMonitor />
+      {/* Only show live monitoring, not calibration status or controls */}
+      <ExamMonitor studentId={studentId} sessionId={sessionId || ""} />
 
       {/* Header */}
       <header className="border-b bg-secondary shadow-sm">

@@ -1,73 +1,142 @@
-# Welcome to your Lovable project
 
-## Project info
+# Real-Time Cheating Detection System Integration
 
-**URL**: https://lovable.dev/projects/fe76803c-b9d9-4fdf-9369-fa3c22cf5fcb
+This project implements a robust, multimodal cheating detection system for web-based online exams, combining mouse and keystroke dynamics, calibration, personalized thresholds, and buffered alerts.
 
-## How can I edit this code?
+## Stack
+- **Frontend:** React + Vite (`src/components/ExamMonitor.tsx`)
+- **Backend:** Flask (`exam-proctoring-backend/app.py`)
+- **Database:** Supabase (see schema below)
+- **ML Models:** `mouse_model.joblib`, `keystroke_model.joblib` and their scalers
 
-There are several ways of editing your application.
+---
 
-**Use Lovable**
+## Setup Instructions
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/fe76803c-b9d9-4fdf-9369-fa3c22cf5fcb) and start prompting.
+### 1. Backend (Flask)
 
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
+**Install dependencies:**
 
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+cd exam-proctoring-backend
+python -m venv venv
+venv\Scripts\activate  # On Windows
+pip install -r requirements.txt
+```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+**Configure environment:**
 
-# Step 3: Install the necessary dependencies.
-npm i
+Copy `.env.example` to `.env` and fill in your Supabase project URL and service role key:
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+```
+SUPABASE_URL=your-supabase-url
+SUPABASE_KEY=your-service-role-key
+```
+
+**Run backend:**
+
+```sh
+python app.py
+```
+
+---
+
+### 2. Frontend (React)
+
+**Install dependencies:**
+
+```sh
+npm install
+```
+
+**Run frontend:**
+
+```sh
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+---
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+### 3. Supabase Integration
 
-**Use GitHub Codespaces**
+**Create personal_thresholds table:**
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+See `exam-proctoring-backend/personal_thresholds.sql` for SQL and policy examples.
 
-## What technologies are used for this project?
+```sql
+CREATE TABLE public.personal_thresholds (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID REFERENCES public.students(id) ON DELETE CASCADE,
+  fusion_mean NUMERIC NOT NULL,
+  fusion_std NUMERIC NOT NULL,
+  threshold NUMERIC NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 
-This project is built with:
+**Policies:**
+- Students can SELECT own
+- Admins SELECT all
+- System INSERT
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+---
 
-## How can I deploy this project?
+## Testing & Usage
 
-Simply open [Lovable](https://lovable.dev/projects/fe76803c-b9d9-4fdf-9369-fa3c22cf5fcb) and click on Share -> Publish.
+1. **Calibration:**
+	- Enter Student ID, click "Start Calibration" in ExamMonitor.
+	- Calibration data is sent every 10s to `/calibration/submit`.
+	- Click "Complete Calibration" to compute and store personalized threshold.
 
-## Can I connect a custom domain to my Lovable project?
+2. **Exam Monitoring:**
+	- After calibration, monitoring starts automatically.
+	- Mouse and keystroke features are sent every 10s to `/predict`.
+	- Fusion score and status are displayed live. Sonner toasts show alerts.
+	- After 3 consecutive suspicious intervals, a cheating incident is recorded in Supabase and a "🚨 Cheating incident recorded" toast is shown.
 
-Yes, you can!
+3. **Backend Endpoints:**
+	- `GET /health` — health check
+	- `POST /calibration/start` — start calibration session
+	- `POST /calibration/submit` — submit calibration features
+	- `POST /calibration/complete` — compute/store threshold
+	- `POST /predict` — real-time prediction
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+4. **Supabase Tables:**
+	- `personal_thresholds` — stores per-user fusion mean, std, threshold
+	- `cheating_incidents` — records suspicious/cheating events
+	- `behavioral_metrics` — stores feature batches
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+---
+
+## Behavioral Logic Summary
+
+- **Fusion:** `0.1 × P_mouse + 0.9 × P_keystroke`
+- **Threshold:** `mean + 1.0 × std` (per student)
+- **Buffered alerts:** 3 consecutive intervals
+- **Calibration required before exam start**
+- **Low false positives:** user adaptation + multimodal fusion
+
+---
+
+## Troubleshooting
+
+- Ensure models and scalers are present in `exam-proctoring-backend/models/`
+- Check `.env` for correct Supabase credentials
+- Confirm Supabase tables and policies are set up
+- Use browser dev tools and backend logs for debugging
+
+---
+
+## File Reference
+
+- `exam-proctoring-backend/app.py` — Flask backend
+- `exam-proctoring-backend/requirements.txt` — Python dependencies
+- `exam-proctoring-backend/.env.example` — environment variable template
+- `src/components/ExamMonitor.tsx` — frontend monitoring component
+- `exam-proctoring-backend/personal_thresholds.sql` — Supabase table SQL
+
+---
+
+## Contact
+
+For support, open an issue or contact the project maintainer.

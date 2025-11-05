@@ -93,6 +93,8 @@ const CalibrationPage = () => {
         setSessionId(sessionData.id);
       }
 
+      console.log("[CalibrationPage] Calibration session started for student:", session?.user?.id);
+
       setLoading(false);
     };
 
@@ -129,6 +131,8 @@ const CalibrationPage = () => {
     if (!session) return;
 
     const currentQuestion = CALIBRATION_QUESTIONS[questionIndex];
+
+    console.log("[CalibrationPage] Saving behavioral metrics for question", questionIndex);
 
     if (currentQuestion.type === "essay") {
       const metrics = keystrokeDynamics.getCurrentMetrics();
@@ -195,6 +199,8 @@ const CalibrationPage = () => {
         .from("calibration_sessions")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", sessionId);
+
+      console.log("[CalibrationPage] Calibration complete for session:", sessionId);
 
       toast({
         title: "Calibration completed!",
