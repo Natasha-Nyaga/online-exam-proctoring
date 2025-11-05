@@ -18,7 +18,7 @@ const Index = () => {
               <CardTitle className="text-2xl font-bold tracking-wide mb-1 mx-px">Student Portal</CardTitle>
               <CardDescription className="text-base">Take exams with confidence</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6 pt-0">
+            <CardContent className="space-y-6 pt-4">
               <Link to="/student-login">
                 <Button className="w-full mb-4 rounded-xl py-3 text-lg font-semibold shadow-md transition">Login</Button>
               </Link>
@@ -36,7 +36,7 @@ const Index = () => {
               <CardTitle className="text-2xl font-bold tracking-wide mb-1">Instructor Portal</CardTitle>
               <CardDescription className="text-base">Manage exams and monitor sessions</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6 pt-0">
+            <CardContent className="space-y-6 pt-4">
               <Link to="/admin-login">
                 <Button className="w-full mb-4 rounded-xl py-3 text-lg font-semibold shadow-md transition">Login</Button>
               </Link>
