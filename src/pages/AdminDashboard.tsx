@@ -7,6 +7,7 @@ import { AdminSidebar } from "@/components/admin/AdminSidebar";
 import { useToast } from "@/hooks/use-toast";
 import CreateExamForm from "@/components/admin/CreateExamForm";
 import ExamSessionsList from "@/components/admin/ExamSessionsList";
+import { MyExams } from "@/components/admin/MyExams";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -72,6 +73,7 @@ const AdminDashboard = () => {
 
           <main className="flex-1 p-8 overflow-auto">
             {activeTab === "sessions" && <ExamSessionsList />}
+            {activeTab === "my-exams" && <MyExams />}
             {activeTab === "create" && <CreateExamForm />}
           </main>
         </div>

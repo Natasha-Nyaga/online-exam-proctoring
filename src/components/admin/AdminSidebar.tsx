@@ -1,4 +1,4 @@
-import { FileText, LayoutDashboard } from "lucide-react";
+import { FileText, LayoutDashboard, BookOpen } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -18,6 +18,7 @@ interface AdminSidebarProps {
 export function AdminSidebar({ activeTab, onTabChange }: AdminSidebarProps) {
   const items = [
     { title: "Sessions", value: "sessions", icon: LayoutDashboard },
+    { title: "My Exams", value: "my-exams", icon: BookOpen },
     { title: "Create Exam", value: "create", icon: FileText },
   ];
 
