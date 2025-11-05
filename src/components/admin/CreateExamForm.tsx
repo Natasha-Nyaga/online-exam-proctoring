@@ -57,19 +57,15 @@ const CreateExamForm = () => {
         return;
       }
 
-      try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.js";
-        console.log("[PDF Debug] Worker src set");
-  toast({ title: "Worker src set", description: "/pdf.worker.js" });
-      } catch (err) {
-        console.error("[PDF Debug] Failed to set workerSrc", err);
-        toast({
-          title: "Worker src error",
-          description: err?.message || String(err),
-          className: "bg-error text-error-foreground",
-        });
-        return;
-      }
+      // Set worker source - try multiple paths
+      const workerPaths = [
+        `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`,
+        '/pdf.worker.min.mjs',
+        '/pdf.worker.js'
+      ];
+      
+      pdfjsLib.GlobalWorkerOptions.workerSrc = workerPaths[0];
+      console.log("[PDF Debug] Worker src set to:", workerPaths[0]);
 
       let arrayBuffer;
       try {
