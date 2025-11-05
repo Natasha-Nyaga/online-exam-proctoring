@@ -2,10 +2,8 @@ import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { GraduationCap, Shield } from "lucide-react";
-
 const Index = () => {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-0 md:p-8">
+  return <div className="min-h-screen flex items-center justify-center bg-background p-0 md:p-8">
       <div className="text-center max-w-3xl w-full space-y-12">
         <div className="space-y-6">
           <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-primary drop-shadow-lg mb-2">ProctorWatch</h1>
@@ -17,7 +15,7 @@ const Index = () => {
           <Card className="border-2 rounded-xl shadow-xl bg-card hover:shadow-2xl transition-shadow">
             <CardHeader className="pb-0">
               <GraduationCap className="h-14 w-14 mx-auto mb-6 text-accent drop-shadow" />
-              <CardTitle className="text-2xl font-bold tracking-wide mb-1">Student Portal</CardTitle>
+              <CardTitle className="text-2xl font-bold tracking-wide mb-1 mx-px">Student Portal</CardTitle>
               <CardDescription className="text-base">Take exams with confidence</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6 pt-0">
@@ -51,8 +49,6 @@ const Index = () => {
           </Card>
         </div>
       </div>
-    </div>
-  );
+    </div>;
 };
-
 export default Index;
