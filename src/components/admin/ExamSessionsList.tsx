@@ -22,6 +22,7 @@ interface ExamSession {
   started_at: string;
   completed_at: string | null;
   status: string;
+  total_score: number | null;
   exams: { title: string };
   student_id: string;
   students?: {
@@ -49,6 +50,7 @@ const ExamSessionsList = () => {
           started_at,
           completed_at,
           status,
+          total_score,
           exams (title),
           student_id,
           students!student_id (
@@ -174,6 +176,7 @@ const ExamSessionsList = () => {
                   <TableHead className="font-semibold">Student Name</TableHead>
                   <TableHead className="font-semibold">Student ID</TableHead>
                   <TableHead className="font-semibold">Exam Title</TableHead>
+                  <TableHead className="font-semibold">Score</TableHead>
                   <TableHead className="font-semibold">Started At</TableHead>
                   <TableHead className="font-semibold">Status</TableHead>
                   <TableHead className="font-semibold text-center">Anomalies</TableHead>
@@ -192,6 +195,11 @@ const ExamSessionsList = () => {
                       {session.student_id}
                     </TableCell>
                     <TableCell>{session.exams.title}</TableCell>
+                    <TableCell>
+                      <span className="font-semibold text-primary">
+                        {session.total_score !== null ? session.total_score : "N/A"}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-sm">
                       {new Date(session.started_at).toLocaleString()}
                     </TableCell>
