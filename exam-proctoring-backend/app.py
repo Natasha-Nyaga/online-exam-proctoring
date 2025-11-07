@@ -54,29 +54,69 @@ KEYSTROKE_WEIGHT = 0.55
 DEFAULT_THRESHOLD = 0.55
 
 def get_user_threshold(student_id):
-    """Fetch adaptive threshold from calibration data or return default"""
+    """Fetch personalized threshold from database or return default"""
     if not supabase or not student_id:
         return DEFAULT_THRESHOLD
     
     try:
-        # Query calibration sessions for this student
-        result = supabase.table('calibration_sessions')\
-            .select('id')\
+        # Query personal_thresholds for this student (most recent)
+        result = supabase.table('personal_thresholds')\
+            .select('threshold')\
             .eq('student_id', student_id)\
-            .eq('status', 'completed')\
-            .order('completed_at', desc=True)\
+            .order('created_at', desc=True)\
             .limit(1)\
             .execute()
         
         if result.data and len(result.data) > 0:
-            # User has completed calibration, could implement adaptive threshold logic here
-            # For now, return slightly adjusted threshold based on calibration existence
-            return DEFAULT_THRESHOLD * 0.95  # Slightly lower for calibrated users
+            threshold = float(result.data[0]['threshold'])
+            print(f"[Backend] Using personalized threshold {threshold:.3f} for student {student_id}")
+            return threshold
         
+        print(f"[Backend] No personalized threshold found for student {student_id}, using default")
         return DEFAULT_THRESHOLD
     except Exception as e:
         print(f"[Backend] Error fetching threshold: {e}")
         return DEFAULT_THRESHOLD
+
+def extract_features_from_metrics(metrics, metric_type):
+    """Extract ordered feature array from behavioral metrics"""
+    if metric_type == 'mouse':
+        return np.array([
+            float(metrics.get('movement_speed', 0) or 0),
+            float(metrics.get('click_frequency', 0) or 0),
+            float(metrics.get('hover_times', [0])[0] if metrics.get('hover_times') else 0),
+            float(metrics.get('trajectory_smoothness', 0) or 0),
+            float(metrics.get('acceleration', 0) or 0),
+            0.0,  # path_length placeholder
+            0.0,  # avg_speed placeholder
+            0.0,  # idle_time placeholder
+            0.0,  # dwell_time placeholder
+            0.0,  # click_interval_mean placeholder
+            0.0   # transition_time placeholder
+        ]).reshape(1, -1)
+    elif metric_type == 'keystroke':
+        dwell_times = metrics.get('dwell_times', {})
+        flight_times = metrics.get('flight_times', {})
+        
+        # Extract basic stats
+        dwell_list = list(dwell_times.values()) if isinstance(dwell_times, dict) else []
+        flight_list = list(flight_times.values()) if isinstance(flight_times, dict) else []
+        
+        typing_speed = float(metrics.get('typing_speed', 0) or 0)
+        error_rate = float(metrics.get('error_rate', 0) or 0)
+        
+        # Create feature array with available data (padding with zeros for missing features)
+        features = [0.0] * len(KEYSTROKE_FEATURE_ORDER)
+        features[-3] = typing_speed  # typing_speed
+        features[-1] = error_rate    # error_rate
+        
+        if dwell_list:
+            features[-4] = np.mean(dwell_list)  # digraph_mean
+            features[-5] = np.var(dwell_list) if len(dwell_list) > 1 else 0  # digraph_variance
+        
+        return np.array(features).reshape(1, -1)
+    
+    return None
 
 def log_cheating_incident(session_id, fusion_score, mouse_features, keystroke_features, mouse_prob, keystroke_prob):
     """Log cheating incident to Supabase"""
@@ -189,12 +229,94 @@ def predict():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
-@app.route("/calibration/start", methods=["POST"])
-def calibration_start():
-    data = request.get_json()
-    student_id = data.get("student_id")
-    # For demo, just return success and echo student_id
-    return jsonify({"status": "calibration started", "student_id": student_id}), 200
+@app.route("/calibration/compute-threshold", methods=["POST"])
+def compute_threshold():
+    """
+    Compute personalized threshold from calibration session data
+    Processes all behavioral metrics, runs predictions, and stores adaptive threshold
+    """
+    try:
+        data = request.get_json()
+        student_id = data.get("student_id")
+        session_id = data.get("calibration_session_id")
+        
+        if not student_id or not session_id:
+            return jsonify({"error": "Missing student_id or calibration_session_id"}), 400
+        
+        print(f"[Backend] Computing threshold for student {student_id}, session {session_id}")
+        
+        # Fetch all behavioral metrics for this calibration session
+        result = supabase.table('behavioral_metrics')\
+            .select('*')\
+            .eq('calibration_session_id', session_id)\
+            .eq('student_id', student_id)\
+            .execute()
+        
+        if not result.data or len(result.data) == 0:
+            return jsonify({"error": "No calibration metrics found"}), 404
+        
+        print(f"[Backend] Found {len(result.data)} calibration metrics")
+        
+        # Process each metric and compute fusion scores
+        fusion_scores = []
+        
+        for metric in result.data:
+            metric_type = metric.get('metric_type')
+            
+            # Extract features based on metric type
+            if metric_type == 'mouse':
+                mouse_features = extract_features_from_metrics(metric, 'mouse')
+                if mouse_features is not None:
+                    mouse_scaled = mouse_scaler.transform(mouse_features)
+                    p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
+                    # For calibration, use mouse score with higher weight if keystroke not available
+                    fusion_scores.append(p_mouse)
+            
+            elif metric_type == 'keystroke':
+                keystroke_features = extract_features_from_metrics(metric, 'keystroke')
+                if keystroke_features is not None:
+                    keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+                    p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
+                    fusion_scores.append(p_keystroke)
+        
+        if len(fusion_scores) == 0:
+            return jsonify({"error": "Could not compute any valid predictions"}), 400
+        
+        # Compute statistics
+        fusion_mean = float(np.mean(fusion_scores))
+        fusion_std = float(np.std(fusion_scores))
+        
+        # Compute adaptive threshold: mean + 2 * std (captures ~95% of normal behavior)
+        # This ensures that only significant deviations trigger alerts
+        adaptive_threshold = min(fusion_mean + (2.0 * fusion_std), 0.85)  # Cap at 0.85
+        adaptive_threshold = max(adaptive_threshold, 0.45)  # Floor at 0.45
+        
+        print(f"[Backend] Fusion scores: mean={fusion_mean:.3f}, std={fusion_std:.3f}, threshold={adaptive_threshold:.3f}")
+        
+        # Store in database
+        supabase.table('personal_thresholds').insert({
+            "student_id": student_id,
+            "calibration_session_id": session_id,
+            "fusion_mean": fusion_mean,
+            "fusion_std": fusion_std,
+            "threshold": adaptive_threshold
+        }).execute()
+        
+        print(f"[Backend] Stored personalized threshold for student {student_id}")
+        
+        return jsonify({
+            "status": "success",
+            "fusion_mean": fusion_mean,
+            "fusion_std": fusion_std,
+            "threshold": adaptive_threshold,
+            "samples_processed": len(fusion_scores)
+        }), 200
+        
+    except Exception as e:
+        print(f"[Backend] Error computing threshold: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.getenv("FLASK_PORT", 5000))

@@ -202,11 +202,45 @@ const CalibrationPage = () => {
 
       console.log("[CalibrationPage] Calibration complete for session:", sessionId);
 
-      toast({
-        title: "Calibration completed!",
-        description: "Your behavioral baseline has been recorded.",
-        className: "bg-success text-success-foreground",
-      });
+      // Compute personalized threshold from calibration data
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        try {
+          console.log("[CalibrationPage] Computing personalized threshold...");
+          const response = await fetch("http://127.0.0.1:5000/calibration/compute-threshold", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              student_id: user.id,
+              calibration_session_id: sessionId
+            })
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log("[CalibrationPage] Personalized threshold computed:", result);
+            toast({
+              title: "Calibration completed!",
+              description: `Your personalized threshold (${result.threshold.toFixed(3)}) has been computed from ${result.samples_processed} samples.`,
+              className: "bg-success text-success-foreground",
+            });
+          } else {
+            console.error("[CalibrationPage] Failed to compute threshold:", await response.text());
+            toast({
+              title: "Calibration completed!",
+              description: "Your behavioral baseline has been recorded.",
+              className: "bg-success text-success-foreground",
+            });
+          }
+        } catch (thresholdError) {
+          console.error("[CalibrationPage] Error computing threshold:", thresholdError);
+          toast({
+            title: "Calibration completed!",
+            description: "Your behavioral baseline has been recorded.",
+            className: "bg-success text-success-foreground",
+          });
+        }
+      }
 
       if (examId) {
         navigate(`/exam/${examId}`);

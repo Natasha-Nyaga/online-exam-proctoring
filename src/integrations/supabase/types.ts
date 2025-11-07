@@ -304,6 +304,51 @@ export type Database = {
           },
         ]
       }
+      personal_thresholds: {
+        Row: {
+          calibration_session_id: string
+          created_at: string | null
+          fusion_mean: number
+          fusion_std: number
+          id: string
+          student_id: string
+          threshold: number
+        }
+        Insert: {
+          calibration_session_id: string
+          created_at?: string | null
+          fusion_mean: number
+          fusion_std: number
+          id?: string
+          student_id: string
+          threshold: number
+        }
+        Update: {
+          calibration_session_id?: string
+          created_at?: string | null
+          fusion_mean?: number
+          fusion_std?: number
+          id?: string
+          student_id?: string
+          threshold?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personal_thresholds_calibration_session_id_fkey"
+            columns: ["calibration_session_id"]
+            isOneToOne: false
+            referencedRelation: "calibration_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "personal_thresholds_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string | null
