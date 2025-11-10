@@ -79,42 +79,104 @@ def get_user_threshold(student_id):
         return DEFAULT_THRESHOLD
 
 def extract_features_from_metrics(metrics, metric_type):
-    """Extract ordered feature array from behavioral metrics"""
+    """
+    Extract ordered feature array from behavioral metrics.
+    CRITICAL: Must match MOUSE_FEATURE_ORDER and KEYSTROKE_FEATURE_ORDER exactly.
+    """
     if metric_type == 'mouse':
-        return np.array([
-            float(metrics.get('movement_speed', 0) or 0),
-            float(metrics.get('click_frequency', 0) or 0),
-            float(metrics.get('hover_times', [0])[0] if metrics.get('hover_times') else 0),
-            float(metrics.get('trajectory_smoothness', 0) or 0),
-            float(metrics.get('acceleration', 0) or 0),
-            0.0,  # path_length placeholder
-            0.0,  # avg_speed placeholder
-            0.0,  # idle_time placeholder
-            0.0,  # dwell_time placeholder
-            0.0,  # click_interval_mean placeholder
-            0.0   # transition_time placeholder
-        ]).reshape(1, -1)
+        # Extract features in exact order of MOUSE_FEATURE_ORDER
+        cursor_positions = metrics.get('cursor_positions', [])
+        click_positions = metrics.get('click_positions', [])
+        hover_times = metrics.get('hover_times', [])
+        
+        # Calculate derived features
+        path_length = 0.0
+        if isinstance(cursor_positions, list) and len(cursor_positions) > 1:
+            for i in range(1, len(cursor_positions)):
+                if isinstance(cursor_positions[i], dict) and isinstance(cursor_positions[i-1], dict):
+                    dx = cursor_positions[i].get('x', 0) - cursor_positions[i-1].get('x', 0)
+                    dy = cursor_positions[i].get('y', 0) - cursor_positions[i-1].get('y', 0)
+                    path_length += np.sqrt(dx**2 + dy**2)
+        
+        avg_speed = float(metrics.get('movement_speed', 0) or 0)
+        click_freq = float(metrics.get('click_frequency', 0) or 0)
+        trajectory_smooth = float(metrics.get('trajectory_smoothness', 0) or 0)
+        acceleration = float(metrics.get('acceleration', 0) or 0)
+        
+        # Compute hover time stats
+        avg_hover = 0.0
+        if isinstance(hover_times, list) and len(hover_times) > 0:
+            hover_vals = [h.get('duration', 0) if isinstance(h, dict) else 0 for h in hover_times]
+            avg_hover = np.mean(hover_vals) if hover_vals else 0.0
+        
+        # Click interval mean
+        click_interval_mean = 0.0
+        if isinstance(click_positions, list) and len(click_positions) > 1:
+            intervals = []
+            for i in range(1, len(click_positions)):
+                if isinstance(click_positions[i], dict) and isinstance(click_positions[i-1], dict):
+                    t1 = click_positions[i-1].get('timestamp', 0)
+                    t2 = click_positions[i].get('timestamp', 0)
+                    if t2 > t1:
+                        intervals.append(t2 - t1)
+            click_interval_mean = np.mean(intervals) if intervals else 0.0
+        
+        # Build feature array in exact order
+        features = [
+            path_length,                    # path_length
+            avg_speed,                      # avg_speed
+            0.0,                            # idle_time (placeholder)
+            0.0,                            # dwell_time (placeholder)
+            avg_hover,                      # hover_time
+            click_freq,                     # click_frequency
+            click_interval_mean,            # click_interval_mean
+            0.0,                            # click_ratio_per_question (placeholder)
+            trajectory_smooth,              # trajectory_smoothness
+            0.0,                            # path_curvature (placeholder)
+            0.0                             # transition_time (placeholder)
+        ]
+        
+        return np.array(features, dtype=float).reshape(1, -1)
+    
     elif metric_type == 'keystroke':
         dwell_times = metrics.get('dwell_times', {})
         flight_times = metrics.get('flight_times', {})
-        
-        # Extract basic stats
-        dwell_list = list(dwell_times.values()) if isinstance(dwell_times, dict) else []
-        flight_list = list(flight_times.values()) if isinstance(flight_times, dict) else []
-        
         typing_speed = float(metrics.get('typing_speed', 0) or 0)
         error_rate = float(metrics.get('error_rate', 0) or 0)
         
-        # Create feature array with available data (padding with zeros for missing features)
+        # Extract dwell and flight time lists
+        dwell_list = list(dwell_times.values()) if isinstance(dwell_times, dict) else []
+        flight_list = list(flight_times.values()) if isinstance(flight_times, dict) else []
+        
+        # Build feature array matching KEYSTROKE_FEATURE_ORDER
+        # Most features are digraph/trigraph timings (H, DD, UD patterns)
+        # We'll approximate with available data
         features = [0.0] * len(KEYSTROKE_FEATURE_ORDER)
-        features[-3] = typing_speed  # typing_speed
-        features[-1] = error_rate    # error_rate
         
+        # Fill in known positions
+        features[31] = typing_speed              # typing_speed
+        features[36] = error_rate                # error_rate
+        
+        # Fill digraph stats
         if dwell_list:
-            features[-4] = np.mean(dwell_list)  # digraph_mean
-            features[-5] = np.var(dwell_list) if len(dwell_list) > 1 else 0  # digraph_variance
+            features[32] = np.mean(dwell_list)   # digraph_mean
+            features[33] = np.var(dwell_list) if len(dwell_list) > 1 else 0.0  # digraph_variance
         
-        return np.array(features).reshape(1, -1)
+        if flight_list:
+            features[34] = np.mean(flight_list)  # trigraph_mean
+            features[35] = np.var(flight_list) if len(flight_list) > 1 else 0.0  # trigraph_variance
+        
+        # For H (hold), DD (down-down), UD (up-down) patterns: use approximations
+        # This is simplified - ideally we'd track specific key pairs
+        for i in range(31):  # Fill first 31 features with patterns
+            if i % 3 == 0 and dwell_list:  # H patterns
+                features[i] = dwell_list[i // 3] if i // 3 < len(dwell_list) else 0.0
+            elif i % 3 == 1 and flight_list:  # DD patterns
+                features[i] = flight_list[i // 3] if i // 3 < len(flight_list) else 0.0
+            elif i % 3 == 2 and flight_list:  # UD patterns
+                features[i] = flight_list[i // 3] if i // 3 < len(flight_list) else 0.0
+        
+        return np.array(features, dtype=float).reshape(1, -1)
     
     return None
 
@@ -158,8 +220,8 @@ def log_cheating_incident(session_id, fusion_score, mouse_features, keystroke_fe
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Real-time cheating prediction endpoint
-    Accepts mouse and keystroke features, returns fusion score and cheating prediction
+    Real-time cheating prediction endpoint with comprehensive debug logging.
+    Accepts mouse and keystroke features, returns fusion score and cheating prediction.
     """
     try:
         data = request.get_json()
@@ -173,6 +235,13 @@ def predict():
         student_id = data.get("student_id")
         session_id = data.get("session_id")
         
+        print(f"\n{'='*60}")
+        print(f"[Backend] NEW PREDICTION REQUEST")
+        print(f"[Backend] Student: {student_id}, Session: {session_id}")
+        print(f"[Backend] Received feature keys:")
+        print(f"  Mouse keys: {list(mouse_features_dict.keys())}")
+        print(f"  Keystroke keys: {list(keystroke_features_dict.keys())}")
+        
         # Convert feature dictionaries to ordered arrays
         mouse_features = np.array([
             float(mouse_features_dict.get(f, 0.0)) for f in MOUSE_FEATURE_ORDER
@@ -182,19 +251,59 @@ def predict():
             float(keystroke_features_dict.get(f, 0.0)) for f in KEYSTROKE_FEATURE_ORDER
         ]).reshape(1, -1)
         
-        print(f"[Backend] Processing prediction for student {student_id}, session {session_id}")
-        print(f"[Backend] Mouse features shape: {mouse_features.shape}, Keystroke features shape: {keystroke_features.shape}")
+        print(f"[Backend] Raw feature arrays:")
+        print(f"  Mouse shape: {mouse_features.shape}, sum: {np.sum(mouse_features):.4f}")
+        print(f"  Mouse values (first 5): {mouse_features[0][:5]}")
+        print(f"  Keystroke shape: {keystroke_features.shape}, sum: {np.sum(keystroke_features):.4f}")
+        print(f"  Keystroke values (first 5): {keystroke_features[0][:5]}")
+        
+        # Validate model/scaler shapes
+        expected_mouse_features = mouse_scaler.n_features_in_
+        expected_keystroke_features = keystroke_scaler.n_features_in_
+        
+        if mouse_features.shape[1] != expected_mouse_features:
+            print(f"[Backend] WARNING: Mouse feature count mismatch! Expected {expected_mouse_features}, got {mouse_features.shape[1]}")
+        
+        if keystroke_features.shape[1] != expected_keystroke_features:
+            print(f"[Backend] WARNING: Keystroke feature count mismatch! Expected {expected_keystroke_features}, got {keystroke_features.shape[1]}")
+        
+        # SAFEGUARD: Skip prediction if both feature arrays are zero or near-zero (idle state)
+        mouse_sum = np.sum(np.abs(mouse_features))
+        keystroke_sum = np.sum(np.abs(keystroke_features))
+        
+        if mouse_sum < 0.001 and keystroke_sum < 0.001:
+            print(f"[Backend] IDLE STATE DETECTED - Skipping prediction (all features near zero)")
+            print(f"{'='*60}\n")
+            return jsonify({
+                "fusion_score": 0.0,
+                "cheating_prediction": 0,
+                "user_threshold": DEFAULT_THRESHOLD,
+                "mouse_probability": 0.0,
+                "keystroke_probability": 0.0,
+                "status": "idle"
+            })
         
         # Scale features
         mouse_scaled = mouse_scaler.transform(mouse_features)
         keystroke_scaled = keystroke_scaler.transform(keystroke_features)
         
+        print(f"[Backend] Scaled features:")
+        print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
+        print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
+        
         # Get predictions from both models
         p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
         p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
         
+        print(f"[Backend] Individual model probabilities:")
+        print(f"  Mouse probability: {p_mouse:.4f}")
+        print(f"  Keystroke probability: {p_keystroke:.4f}")
+        
         # Fusion: weighted average optimized to minimize false positives
         fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
+        
+        print(f"[Backend] Fusion calculation:")
+        print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
         
         # Get adaptive threshold for this user
         user_threshold = get_user_threshold(student_id)
@@ -202,7 +311,11 @@ def predict():
         # Make prediction
         cheating_prediction = int(fusion_score > user_threshold)
         
-        print(f"[Backend] Mouse prob: {p_mouse:.3f}, Keystroke prob: {p_keystroke:.3f}, Fusion: {fusion_score:.3f}, Threshold: {user_threshold:.3f}, Prediction: {cheating_prediction}")
+        print(f"[Backend] FINAL RESULT:")
+        print(f"  Fusion Score: {fusion_score:.4f}")
+        print(f"  User Threshold: {user_threshold:.4f}")
+        print(f"  Cheating Prediction: {cheating_prediction} ({'FLAGGED' if cheating_prediction else 'NORMAL'})")
+        print(f"{'='*60}\n")
         
         # Log to Supabase if cheating detected
         if cheating_prediction == 1 and session_id:
@@ -224,7 +337,7 @@ def predict():
         })
         
     except Exception as e:
-        print(f"[Backend] Prediction error: {e}")
+        print(f"[Backend] PREDICTION ERROR: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -232,8 +345,8 @@ def predict():
 @app.route("/calibration/compute-threshold", methods=["POST"])
 def compute_threshold():
     """
-    Compute personalized threshold from calibration session data
-    Processes all behavioral metrics, runs predictions, and stores adaptive threshold
+    Compute personalized threshold from calibration session data.
+    NOW PROPERLY COMPUTES FUSED SCORES from both models when available.
     """
     try:
         data = request.get_json()
@@ -243,7 +356,9 @@ def compute_threshold():
         if not student_id or not session_id:
             return jsonify({"error": "Missing student_id or calibration_session_id"}), 400
         
-        print(f"[Backend] Computing threshold for student {student_id}, session {session_id}")
+        print(f"\n{'='*60}")
+        print(f"[Calibration] Computing threshold for student {student_id}")
+        print(f"[Calibration] Session: {session_id}")
         
         # Fetch all behavioral metrics for this calibration session
         result = supabase.table('behavioral_metrics')\
@@ -253,33 +368,71 @@ def compute_threshold():
             .execute()
         
         if not result.data or len(result.data) == 0:
+            print(f"[Calibration] ERROR: No metrics found")
             return jsonify({"error": "No calibration metrics found"}), 404
         
-        print(f"[Backend] Found {len(result.data)} calibration metrics")
+        print(f"[Calibration] Found {len(result.data)} calibration metrics")
         
-        # Process each metric and compute fusion scores
+        # Group metrics by question_index to pair mouse + keystroke
+        metrics_by_question = {}
+        for metric in result.data:
+            q_idx = metric.get('question_index')
+            if q_idx not in metrics_by_question:
+                metrics_by_question[q_idx] = {'mouse': None, 'keystroke': None}
+            
+            metric_type = metric.get('metric_type')
+            if metric_type in ['mouse', 'keystroke']:
+                metrics_by_question[q_idx][metric_type] = metric
+        
+        print(f"[Calibration] Grouped into {len(metrics_by_question)} question samples")
+        
+        # Compute fusion scores for each paired sample
         fusion_scores = []
         
-        for metric in result.data:
-            metric_type = metric.get('metric_type')
+        for q_idx, pair in metrics_by_question.items():
+            mouse_metric = pair['mouse']
+            keystroke_metric = pair['keystroke']
             
-            # Extract features based on metric type
-            if metric_type == 'mouse':
-                mouse_features = extract_features_from_metrics(metric, 'mouse')
-                if mouse_features is not None:
-                    mouse_scaled = mouse_scaler.transform(mouse_features)
-                    p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
-                    # For calibration, use mouse score with higher weight if keystroke not available
-                    fusion_scores.append(p_mouse)
+            p_mouse = None
+            p_keystroke = None
             
-            elif metric_type == 'keystroke':
-                keystroke_features = extract_features_from_metrics(metric, 'keystroke')
-                if keystroke_features is not None:
-                    keystroke_scaled = keystroke_scaler.transform(keystroke_features)
-                    p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
-                    fusion_scores.append(p_keystroke)
+            # Get mouse prediction
+            if mouse_metric:
+                try:
+                    mouse_features = extract_features_from_metrics(mouse_metric, 'mouse')
+                    if mouse_features is not None and np.sum(np.abs(mouse_features)) > 0.001:
+                        mouse_scaled = mouse_scaler.transform(mouse_features)
+                        p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
+                except Exception as e:
+                    print(f"[Calibration] Warning: Mouse feature extraction failed for Q{q_idx}: {e}")
+            
+            # Get keystroke prediction
+            if keystroke_metric:
+                try:
+                    keystroke_features = extract_features_from_metrics(keystroke_metric, 'keystroke')
+                    if keystroke_features is not None and np.sum(np.abs(keystroke_features)) > 0.001:
+                        keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+                        p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
+                except Exception as e:
+                    print(f"[Calibration] Warning: Keystroke feature extraction failed for Q{q_idx}: {e}")
+            
+            # Compute fused score
+            if p_mouse is not None and p_keystroke is not None:
+                # Best case: both models available, use weighted fusion
+                fusion = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
+                fusion_scores.append(fusion)
+                print(f"[Calibration] Q{q_idx}: mouse={p_mouse:.3f}, keystroke={p_keystroke:.3f}, fusion={fusion:.3f}")
+            elif p_mouse is not None:
+                # Only mouse available
+                fusion_scores.append(p_mouse)
+                print(f"[Calibration] Q{q_idx}: mouse={p_mouse:.3f} (keystroke N/A)")
+            elif p_keystroke is not None:
+                # Only keystroke available
+                fusion_scores.append(p_keystroke)
+                print(f"[Calibration] Q{q_idx}: keystroke={p_keystroke:.3f} (mouse N/A)")
         
         if len(fusion_scores) == 0:
+            print(f"[Calibration] ERROR: No valid fusion scores computed")
             return jsonify({"error": "Could not compute any valid predictions"}), 400
         
         # Compute statistics
@@ -287,11 +440,17 @@ def compute_threshold():
         fusion_std = float(np.std(fusion_scores))
         
         # Compute adaptive threshold: mean + 2 * std (captures ~95% of normal behavior)
-        # This ensures that only significant deviations trigger alerts
-        adaptive_threshold = min(fusion_mean + (2.0 * fusion_std), 0.85)  # Cap at 0.85
+        # Cap between 0.45 and 0.85 to prevent extreme values
+        adaptive_threshold = fusion_mean + (2.0 * fusion_std)
+        adaptive_threshold = min(adaptive_threshold, 0.85)  # Cap at 0.85
         adaptive_threshold = max(adaptive_threshold, 0.45)  # Floor at 0.45
         
-        print(f"[Backend] Fusion scores: mean={fusion_mean:.3f}, std={fusion_std:.3f}, threshold={adaptive_threshold:.3f}")
+        print(f"[Calibration] Statistics:")
+        print(f"  Samples: {len(fusion_scores)}")
+        print(f"  Mean: {fusion_mean:.4f}")
+        print(f"  Std Dev: {fusion_std:.4f}")
+        print(f"  Adaptive Threshold: {adaptive_threshold:.4f}")
+        print(f"  Formula: min(max({fusion_mean:.4f} + 2*{fusion_std:.4f}, 0.45), 0.85)")
         
         # Store in database
         supabase.table('personal_thresholds').insert({
@@ -302,7 +461,8 @@ def compute_threshold():
             "threshold": adaptive_threshold
         }).execute()
         
-        print(f"[Backend] Stored personalized threshold for student {student_id}")
+        print(f"[Calibration] SUCCESS: Stored personalized threshold")
+        print(f"{'='*60}\n")
         
         return jsonify({
             "status": "success",
@@ -313,7 +473,7 @@ def compute_threshold():
         }), 200
         
     except Exception as e:
-        print(f"[Backend] Error computing threshold: {e}")
+        print(f"[Calibration] FATAL ERROR: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
