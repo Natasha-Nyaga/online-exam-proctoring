@@ -308,13 +308,28 @@ def predict():
         # Get adaptive threshold for this user
         user_threshold = get_user_threshold(student_id)
         
-        # Make prediction
-        cheating_prediction = int(fusion_score > user_threshold)
+        # Define gray zone boundaries
+        GRAY_ZONE_MARGIN = 0.05
+        lower_bound = user_threshold - GRAY_ZONE_MARGIN
+        upper_bound = user_threshold + GRAY_ZONE_MARGIN
+        
+        # Determine prediction status with gray zone
+        if fusion_score > upper_bound:
+            cheating_prediction = 1
+            status = "flagged"
+        elif fusion_score > lower_bound:
+            cheating_prediction = 0
+            status = "suspicious"
+        else:
+            cheating_prediction = 0
+            status = "normal"
         
         print(f"[Backend] FINAL RESULT:")
         print(f"  Fusion Score: {fusion_score:.4f}")
         print(f"  User Threshold: {user_threshold:.4f}")
-        print(f"  Cheating Prediction: {cheating_prediction} ({'FLAGGED' if cheating_prediction else 'NORMAL'})")
+        print(f"  Gray Zone: [{lower_bound:.4f}, {upper_bound:.4f}]")
+        print(f"  Status: {status.upper()}")
+        print(f"  Cheating Prediction: {cheating_prediction} ({'FLAGGED' if cheating_prediction else 'NOT FLAGGED'})")
         print(f"{'='*60}\n")
         
         # Log to Supabase if cheating detected
@@ -333,7 +348,8 @@ def predict():
             "cheating_prediction": cheating_prediction,
             "user_threshold": float(user_threshold),
             "mouse_probability": float(p_mouse),
-            "keystroke_probability": float(p_keystroke)
+            "keystroke_probability": float(p_keystroke),
+            "status": status
         })
         
     except Exception as e:
@@ -438,10 +454,12 @@ def compute_threshold():
         # Compute statistics
         fusion_mean = float(np.mean(fusion_scores))
         fusion_std = float(np.std(fusion_scores))
+        fusion_min = float(np.min(fusion_scores))
+        fusion_max = float(np.max(fusion_scores))
         
-        # Compute adaptive threshold: mean + 2 * std (captures ~95% of normal behavior)
+        # Compute adaptive threshold: mean + 1.25 * std (more sensitive than 2*std)
         # Cap between 0.45 and 0.85 to prevent extreme values
-        adaptive_threshold = fusion_mean + (2.0 * fusion_std)
+        adaptive_threshold = fusion_mean + (1.25 * fusion_std)
         adaptive_threshold = min(adaptive_threshold, 0.85)  # Cap at 0.85
         adaptive_threshold = max(adaptive_threshold, 0.45)  # Floor at 0.45
         
@@ -449,8 +467,9 @@ def compute_threshold():
         print(f"  Samples: {len(fusion_scores)}")
         print(f"  Mean: {fusion_mean:.4f}")
         print(f"  Std Dev: {fusion_std:.4f}")
+        print(f"  Score Range: [{fusion_min:.4f}, {fusion_max:.4f}]")
         print(f"  Adaptive Threshold: {adaptive_threshold:.4f}")
-        print(f"  Formula: min(max({fusion_mean:.4f} + 2*{fusion_std:.4f}, 0.45), 0.85)")
+        print(f"  Formula: min(max({fusion_mean:.4f} + 1.25*{fusion_std:.4f}, 0.45), 0.85)")
         
         # Store in database
         supabase.table('personal_thresholds').insert({
