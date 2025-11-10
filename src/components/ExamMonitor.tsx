@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 const MOUSE_FEATURE_ORDER = [
   "path_length", "avg_speed", "idle_time", "dwell_time", "hover_time",
@@ -24,6 +26,8 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
   const [status, setStatus] = useState<string>("Collecting");
   const [threshold, setThreshold] = useState<number | null>(null);
   const [buffered, setBuffered] = useState<boolean[]>([]);
+  const [simulationMode, setSimulationMode] = useState<boolean>(false);
+  const simulationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const handleMove = (e: MouseEvent) =>
@@ -39,8 +43,28 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
   }, []);
 
   useEffect(() => {
-    const down = (e: KeyboardEvent) =>
+    const down = (e: KeyboardEvent) => {
       setKeyData((p) => [...p, { key: e.key, t: Date.now(), type: "down" }]);
+      
+      // Detect suspicious shortcuts
+      const isSuspicious = 
+        (e.ctrlKey && e.key === 'c') || // Ctrl+C
+        (e.ctrlKey && e.key === 'v') || // Ctrl+V
+        (e.ctrlKey && e.shiftKey && e.key === 'C') || // Ctrl+Shift+C
+        (e.altKey && e.key === 'Tab') || // Alt+Tab
+        (e.metaKey && e.key === 'Tab') || // Command+Tab
+        e.key === 'PrintScreen';
+      
+      if (isSuspicious) {
+        const shortcut = e.ctrlKey ? `Ctrl+${e.key}` : 
+                        e.altKey ? `Alt+${e.key}` :
+                        e.metaKey ? `Cmd+${e.key}` :
+                        e.key;
+        console.log(`[ExamMonitor] Suspicious shortcut detected: ${shortcut}`);
+        handleSuspiciousShortcut(shortcut);
+      }
+    };
+    
     const up = (e: KeyboardEvent) =>
       setKeyData((p) => [...p, { key: e.key, t: Date.now(), type: "up" }]);
     window.addEventListener("keydown", down);
@@ -79,6 +103,77 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
       path_curvature: 0,
       transition_time: 0,
     };
+  };
+
+  const handleSuspiciousShortcut = (shortcut: string) => {
+    toast.warning(`⚠️ Suspicious action: ${shortcut}`);
+    
+    // Inject erratic typing pattern to spike the score
+    const now = Date.now();
+    const burstKeys = ['a', 's', 'd', 'f', 'Backspace', 'Backspace', 'g', 'h'];
+    burstKeys.forEach((key, idx) => {
+      const delay = Math.random() * 50 + 20; // 20-70ms random delays
+      setKeyData((p) => [...p, 
+        { key, t: now + idx * delay, type: "down" },
+        { key, t: now + idx * delay + 30, type: "up" }
+      ]);
+    });
+    
+    // Inject jittery mouse movements
+    for (let i = 0; i < 15; i++) {
+      setMouseData((p) => [...p, {
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        t: now + i * 50
+      }]);
+    }
+  };
+
+  const generateSimulatedData = () => {
+    const now = Date.now();
+    
+    // Generate rapid, jittery mouse movements
+    for (let i = 0; i < 20; i++) {
+      setMouseData((p) => [...p, {
+        x: Math.random() * window.innerWidth,
+        y: Math.random() * window.innerHeight,
+        t: now + i * 30,
+        ...(Math.random() > 0.7 ? { click: true } : {})
+      }]);
+    }
+    
+    // Generate bursts of erratic typing
+    const randomKeys = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
+    const burstLength = Math.floor(Math.random() * 15) + 10;
+    for (let i = 0; i < burstLength; i++) {
+      const key = Math.random() > 0.85 ? 'Backspace' : randomKeys[Math.floor(Math.random() * randomKeys.length)];
+      const irregularDelay = Math.random() * 150 + 30; // 30-180ms
+      setKeyData((p) => [...p,
+        { key, t: now + i * irregularDelay, type: "down" },
+        { key, t: now + i * irregularDelay + Math.random() * 100, type: "up" }
+      ]);
+    }
+  };
+
+  const toggleSimulation = () => {
+    if (simulationMode) {
+      // Stop simulation
+      if (simulationIntervalRef.current) {
+        clearInterval(simulationIntervalRef.current);
+        simulationIntervalRef.current = null;
+      }
+      setSimulationMode(false);
+      toast.info("✅ Simulation disabled");
+    } else {
+      // Start simulation
+      setSimulationMode(true);
+      toast.warning("⚠️ Cheating simulation enabled");
+      
+      // Inject simulated data every 2 seconds
+      simulationIntervalRef.current = setInterval(() => {
+        generateSimulatedData();
+      }, 2000);
+    }
   };
 
   const extractKeystrokeFeatures = () => {
@@ -153,7 +248,17 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
     }
   }, [studentId, sessionId]);
 
+  useEffect(() => {
+    // Cleanup simulation on unmount
+    return () => {
+      if (simulationIntervalRef.current) {
+        clearInterval(simulationIntervalRef.current);
+      }
+    };
+  }, []);
+
   return (
+<<<<<<< HEAD
     <div className="p-4 bg-white rounded-xl shadow-md mt-4">
       <h2 className="font-semibold text-lg mb-2">Exam Behaviour Monitor</h2>
       <div className="mb-2">Session ID: {sessionId || "-"}</div>
@@ -166,6 +271,64 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
       <div className="mb-2">Status: {status}</div>
       <div className="mb-2">
         Buffered: {buffered.map((b) => (b ? "🚨" : "✅")).join(" ")}
+=======
+    <div className="p-4 bg-card rounded-xl shadow-md mt-4 border border-border relative">
+      {simulationMode && (
+        <Badge variant="destructive" className="absolute top-2 right-2 animate-pulse">
+          Sim Mode Active
+        </Badge>
+      )}
+      
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="font-semibold text-lg text-foreground">Exam Behaviour Monitor</h2>
+        <Button
+          onClick={toggleSimulation}
+          variant={simulationMode ? "destructive" : "outline"}
+          size="sm"
+          className={!simulationMode ? "border-purple-500 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950" : ""}
+        >
+          {simulationMode ? "Stop Simulation" : "Simulate Cheating"}
+        </Button>
+      </div>
+      
+      <div className="space-y-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Session ID:</span>
+          <span className="font-mono text-foreground">{sessionId || "-"}</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Threshold:</span>
+          <span className="font-mono text-foreground">
+            {threshold !== null ? threshold.toFixed(3) : "-"}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Fusion Score:</span>
+          <span className="font-mono text-foreground">
+            {fusionScore !== null ? fusionScore.toFixed(3) : "-"}
+          </span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-muted-foreground">Status:</span>
+          <span className={`font-medium ${
+            status.includes("🚨") ? "text-destructive" : 
+            status.includes("⚠️") ? "text-yellow-600 dark:text-yellow-500" : 
+            "text-green-600 dark:text-green-500"
+          }`}>
+            {status}
+          </span>
+        </div>
+        <div className="flex justify-between items-center">
+          <span className="text-muted-foreground">History:</span>
+          <span className="font-mono">
+            {buffered.map((b, i) => (
+              <span key={i} className="ml-1">
+                {b ? "🚨" : "✅"}
+              </span>
+            ))}
+          </span>
+        </div>
+>>>>>>> f892a070a4167dfe627c824c8e317c98f795c7ec
       </div>
     </div>
   );
