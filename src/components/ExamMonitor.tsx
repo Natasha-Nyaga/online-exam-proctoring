@@ -158,10 +158,10 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
       <h2 className="font-semibold text-lg mb-2">Exam Behaviour Monitor</h2>
       <div className="mb-2">Session ID: {sessionId || "-"}</div>
       <div className="mb-2">
-        Threshold: {threshold !== null ? threshold.toFixed(3) : "-"}
+        Threshold: {typeof threshold === "number" ? threshold.toFixed(3) : "-"}
       </div>
       <div className="mb-2">
-        Fusion Score: {fusionScore !== null ? fusionScore.toFixed(3) : "-"}
+        Fusion Score: {typeof fusionScore === "number" ? fusionScore.toFixed(3) : "-"}
       </div>
       <div className="mb-2">Status: {status}</div>
       <div className="mb-2">
