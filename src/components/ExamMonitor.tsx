@@ -258,27 +258,12 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
   }, []);
 
   return (
-<<<<<<< HEAD
-    <div className="p-4 bg-white rounded-xl shadow-md mt-4">
-      <h2 className="font-semibold text-lg mb-2">Exam Behaviour Monitor</h2>
-      <div className="mb-2">Session ID: {sessionId || "-"}</div>
-      <div className="mb-2">
-        Threshold: {typeof threshold === "number" ? threshold.toFixed(3) : "-"}
-      </div>
-      <div className="mb-2">
-        Fusion Score: {typeof fusionScore === "number" ? fusionScore.toFixed(3) : "-"}
-      </div>
-      <div className="mb-2">Status: {status}</div>
-      <div className="mb-2">
-        Buffered: {buffered.map((b) => (b ? "🚨" : "✅")).join(" ")}
-=======
     <div className="p-4 bg-card rounded-xl shadow-md mt-4 border border-border relative">
       {simulationMode && (
         <Badge variant="destructive" className="absolute top-2 right-2 animate-pulse">
           Sim Mode Active
         </Badge>
       )}
-      
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-lg text-foreground">Exam Behaviour Monitor</h2>
         <Button
@@ -290,7 +275,6 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
           {simulationMode ? "Stop Simulation" : "Simulate Cheating"}
         </Button>
       </div>
-      
       <div className="space-y-2 text-sm">
         <div className="flex justify-between">
           <span className="text-muted-foreground">Session ID:</span>
@@ -299,13 +283,13 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
         <div className="flex justify-between">
           <span className="text-muted-foreground">Threshold:</span>
           <span className="font-mono text-foreground">
-            {threshold !== null ? threshold.toFixed(3) : "-"}
+            {typeof threshold === "number" ? threshold.toFixed(3) : "-"}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Fusion Score:</span>
           <span className="font-mono text-foreground">
-            {fusionScore !== null ? fusionScore.toFixed(3) : "-"}
+            {typeof fusionScore === "number" ? fusionScore.toFixed(3) : "-"}
           </span>
         </div>
         <div className="flex justify-between">
@@ -328,7 +312,6 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
             ))}
           </span>
         </div>
->>>>>>> f892a070a4167dfe627c824c8e317c98f795c7ec
       </div>
     </div>
   );

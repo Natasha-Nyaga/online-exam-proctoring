@@ -2,6 +2,7 @@
 # Flask + CORS + Supabase + ML models
 # Implements calibration, prediction, buffered alerts, and personalized thresholds
 
+
 import os
 from dotenv import load_dotenv
 from pathlib import Path
@@ -11,6 +12,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from supabase import create_client, Client
 from datetime import datetime
+import random
 
 # Load environment variables from .env in project root
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
@@ -51,7 +53,67 @@ KEYSTROKE_FEATURE_ORDER = [
 # Fusion weights (optimized to minimize false positives)
 MOUSE_WEIGHT = 0.45
 KEYSTROKE_WEIGHT = 0.55
-DEFAULT_THRESHOLD = 0.55
+
+# Configurable threshold and simulation mode
+DEFAULT_THRESHOLD = float(os.getenv("DEFAULT_THRESHOLD", "0.55"))
+SIMULATION_MODE = os.getenv("SIMULATION_MODE", "off").lower() == "on"
+def generate_simulated_features(mode="cheating"):
+    """
+    Generate simulated feature arrays for mouse and keystroke models.
+    mode: "cheating" or "normal"
+    Returns: mouse_features, keystroke_features (np.array shape (1, n_features))
+    """
+    # Mouse features
+    if mode == "cheating":
+        mouse = [
+            random.uniform(500, 1200),   # path_length (spike)
+            random.uniform(80, 200),     # avg_speed (spike)
+            random.uniform(0, 2),        # idle_time
+            random.uniform(0, 2),        # dwell_time
+            random.uniform(0, 1),        # hover_time
+            random.uniform(10, 30),      # click_frequency (spike)
+            random.uniform(0.1, 0.5),    # click_interval_mean
+            random.uniform(0, 1),        # click_ratio_per_question
+            random.uniform(0.5, 1.5),    # trajectory_smoothness
+            random.uniform(0, 1),        # path_curvature
+            random.uniform(0, 1)         # transition_time
+        ]
+        keystroke = [
+            *(random.uniform(0.1, 0.5) for _ in range(31)),
+            random.uniform(8, 15),       # typing_speed (spike)
+            random.uniform(0.1, 0.3),    # digraph_mean
+            random.uniform(0.05, 0.2),   # digraph_variance
+            random.uniform(0.1, 0.3),    # trigraph_mean
+            random.uniform(0.05, 0.2),   # trigraph_variance
+            random.uniform(0.1, 0.3)     # error_rate (spike)
+        ]
+    else:
+        mouse = [
+            random.uniform(100, 300),    # path_length
+            random.uniform(10, 40),      # avg_speed
+            random.uniform(0, 2),        # idle_time
+            random.uniform(0, 2),        # dwell_time
+            random.uniform(0, 1),        # hover_time
+            random.uniform(1, 5),        # click_frequency
+            random.uniform(0.2, 0.8),    # click_interval_mean
+            random.uniform(0, 1),        # click_ratio_per_question
+            random.uniform(0.2, 0.7),    # trajectory_smoothness
+            random.uniform(0, 1),        # path_curvature
+            random.uniform(0, 1)         # transition_time
+        ]
+        keystroke = [
+            *(random.uniform(0.01, 0.15) for _ in range(31)),
+            random.uniform(2, 6),        # typing_speed
+            random.uniform(0.01, 0.08),  # digraph_mean
+            random.uniform(0.01, 0.05),  # digraph_variance
+            random.uniform(0.01, 0.08),  # trigraph_mean
+            random.uniform(0.01, 0.05),  # trigraph_variance
+            random.uniform(0.01, 0.05)   # error_rate
+        ]
+    return (
+        np.array(mouse, dtype=float).reshape(1, -1),
+        np.array(keystroke, dtype=float).reshape(1, -1)
+    )
 
 def get_user_threshold(student_id):
     """Fetch personalized threshold from database or return default"""
@@ -229,48 +291,58 @@ def predict():
         if not data:
             return jsonify({"error": "No data provided"}), 400
         
-        # Extract features from request
-        mouse_features_dict = data.get("mouse_features", {})
-        keystroke_features_dict = data.get("keystroke_features", {})
-        student_id = data.get("student_id")
-        session_id = data.get("session_id")
-        
-        print(f"\n{'='*60}")
-        print(f"[Backend] NEW PREDICTION REQUEST")
-        print(f"[Backend] Student: {student_id}, Session: {session_id}")
-        print(f"[Backend] Received feature keys:")
-        print(f"  Mouse keys: {list(mouse_features_dict.keys())}")
-        print(f"  Keystroke keys: {list(keystroke_features_dict.keys())}")
-        
-        # Convert feature dictionaries to ordered arrays
-        mouse_features = np.array([
-            float(mouse_features_dict.get(f, 0.0)) for f in MOUSE_FEATURE_ORDER
-        ]).reshape(1, -1)
-        
-        keystroke_features = np.array([
-            float(keystroke_features_dict.get(f, 0.0)) for f in KEYSTROKE_FEATURE_ORDER
-        ]).reshape(1, -1)
-        
+
+        # Simulation mode: inject cheating or normal patterns
+        simulation = data.get("simulation_mode", None)
+        if SIMULATION_MODE or simulation in ["cheating", "normal"]:
+            sim_type = simulation if simulation in ["cheating", "normal"] else "cheating"
+            print(f"[Backend] SIMULATION MODE ACTIVE: {sim_type}")
+            mouse_features, keystroke_features = generate_simulated_features(sim_type)
+            student_id = student_id or "SIM_USER"
+            session_id = session_id or "SIM_SESSION"
+        else:
+            # Extract features from request
+            mouse_features_dict = data.get("mouse_features", {})
+            keystroke_features_dict = data.get("keystroke_features", {})
+            student_id = data.get("student_id")
+            session_id = data.get("session_id")
+
+            print(f"\n{'='*60}")
+            print(f"[Backend] NEW PREDICTION REQUEST")
+            print(f"[Backend] Student: {student_id}, Session: {session_id}")
+            print(f"[Backend] Received feature keys:")
+            print(f"  Mouse keys: {list(mouse_features_dict.keys())}")
+            print(f"  Keystroke keys: {list(keystroke_features_dict.keys())}")
+
+            # Convert feature dictionaries to ordered arrays
+            mouse_features = np.array([
+                float(mouse_features_dict.get(f, 0.0)) for f in MOUSE_FEATURE_ORDER
+            ]).reshape(1, -1)
+
+            keystroke_features = np.array([
+                float(keystroke_features_dict.get(f, 0.0)) for f in KEYSTROKE_FEATURE_ORDER
+            ]).reshape(1, -1)
+
         print(f"[Backend] Raw feature arrays:")
         print(f"  Mouse shape: {mouse_features.shape}, sum: {np.sum(mouse_features):.4f}")
         print(f"  Mouse values (first 5): {mouse_features[0][:5]}")
         print(f"  Keystroke shape: {keystroke_features.shape}, sum: {np.sum(keystroke_features):.4f}")
         print(f"  Keystroke values (first 5): {keystroke_features[0][:5]}")
         
+
         # Validate model/scaler shapes
         expected_mouse_features = mouse_scaler.n_features_in_
         expected_keystroke_features = keystroke_scaler.n_features_in_
-        
+
         if mouse_features.shape[1] != expected_mouse_features:
             print(f"[Backend] WARNING: Mouse feature count mismatch! Expected {expected_mouse_features}, got {mouse_features.shape[1]}")
-        
         if keystroke_features.shape[1] != expected_keystroke_features:
             print(f"[Backend] WARNING: Keystroke feature count mismatch! Expected {expected_keystroke_features}, got {keystroke_features.shape[1]}")
         
+
         # SAFEGUARD: Skip prediction if both feature arrays are zero or near-zero (idle state)
         mouse_sum = np.sum(np.abs(mouse_features))
         keystroke_sum = np.sum(np.abs(keystroke_features))
-        
         if mouse_sum < 0.001 and keystroke_sum < 0.001:
             print(f"[Backend] IDLE STATE DETECTED - Skipping prediction (all features near zero)")
             print(f"{'='*60}\n")
@@ -283,36 +355,47 @@ def predict():
                 "status": "idle"
             })
         
-        # Scale features
-        mouse_scaled = mouse_scaler.transform(mouse_features)
-        keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+
+    # Scale features
+    mouse_scaled = mouse_scaler.transform(mouse_features)
+    keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+
+    print(f"[Backend] Scaled features:")
+    print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
+    print(f"  Mouse scaled (mean, std): {np.mean(mouse_scaled):.4f}, {np.std(mouse_scaled):.4f}")
+    print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
+    print(f"  Keystroke scaled (mean, std): {np.mean(keystroke_scaled):.4f}, {np.std(keystroke_scaled):.4f}")
         
-        print(f"[Backend] Scaled features:")
-        print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
-        print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
+
+    # Get predictions from both models
+    p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
+    p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
+
+    print(f"[Backend] Individual model probabilities:")
+    print(f"  Mouse probability: {p_mouse:.4f}")
+    print(f"  Keystroke probability: {p_keystroke:.4f}")
         
-        # Get predictions from both models
-        p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
-        p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
+
+    # Fusion: weighted average optimized to minimize false positives
+    fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
+
+    print(f"[Backend] Fusion calculation:")
+    print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
         
-        print(f"[Backend] Individual model probabilities:")
-        print(f"  Mouse probability: {p_mouse:.4f}")
-        print(f"  Keystroke probability: {p_keystroke:.4f}")
-        
-        # Fusion: weighted average optimized to minimize false positives
-        fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
-        
-        print(f"[Backend] Fusion calculation:")
-        print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
-        
+
         # Get adaptive threshold for this user
         user_threshold = get_user_threshold(student_id)
-        
+
+        # If model outputs are too low overall, lower the threshold
+        if fusion_score < 0.45 and user_threshold > 0.45:
+            print(f"[Backend] Lowering threshold to 0.45 due to low fusion score")
+            user_threshold = 0.45
+
         # Define gray zone boundaries
         GRAY_ZONE_MARGIN = 0.05
         lower_bound = user_threshold - GRAY_ZONE_MARGIN
         upper_bound = user_threshold + GRAY_ZONE_MARGIN
-        
+
         # Determine prediction status with gray zone
         if fusion_score > upper_bound:
             cheating_prediction = 1
