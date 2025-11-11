@@ -1,4 +1,3 @@
-
 # ...existing code...
 
 import os
@@ -11,63 +10,7 @@ from flask_cors import CORS
 from supabase import create_client, Client
 from datetime import datetime
 import random
-
-# Load environment variables from .env in project root
-load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
-# Also check for backend-specific .env
-load_dotenv(dotenv_path=Path(__file__).parent / ".env")
-
-app = Flask(__name__)
-# Enhanced CORS configuration for better cross-origin support
-CORS(app, resources={
-    r"/*": {
-        "origins": [
-            "http://localhost:5173", "http://127.0.0.1:5173",
-            "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:8080"
-        ],
-        "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
-        "supports_credentials": True
-    }
-})
-
-# Initialize Supabase client
-SUPABASE_URL = os.getenv("VITE_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
-
-# Place this route after app = Flask(__name__) and CORS setup
-@app.route("/get-threshold", methods=["GET"])
-def get_threshold():
-    student_id = request.args.get("student_id")
-    if not student_id:
-        return jsonify({"error": "student_id required"}), 400
-    try:
-        if supabase:
-            result = supabase.table('personal_thresholds')\
-                .select('threshold')\
-                .eq('student_id', student_id)\
-                .order('created_at', desc=True)\
-                .limit(1)\
-                .execute()
-            if result.data and len(result.data) > 0:
-                return jsonify({"threshold": float(result.data[0]['threshold'])})
-        # fallback to default
-        return jsonify({"threshold": DEFAULT_THRESHOLD})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-import os
-from dotenv import load_dotenv
-from pathlib import Path
-import joblib
-import numpy as np
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from supabase import create_client, Client
-from datetime import datetime
-import random
+import json
 
 # Load environment variables from .env in project root
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
@@ -209,29 +152,37 @@ EXPECTED_RANGES = {
 }
 
 def get_user_threshold(student_id):
-    """Fetch personalized threshold from database or return default"""
-    if not supabase or not student_id:
+    """Fetch personalized threshold from Supabase or fallback to default"""
+    DEFAULT_THRESHOLD = 0.85
+    if not student_id:
+        print("[Backend] Missing student_id → using default threshold")
         return DEFAULT_THRESHOLD
-    
+    if not supabase:
+        print("[Backend] Supabase not configured → using default threshold")
+        return DEFAULT_THRESHOLD
     try:
-        # Query personal_thresholds for this student (most recent)
         result = supabase.table('personal_thresholds')\
             .select('threshold')\
             .eq('student_id', student_id)\
             .order('created_at', desc=True)\
             .limit(1)\
             .execute()
-        
         if result.data and len(result.data) > 0:
             threshold = float(result.data[0]['threshold'])
-            print(f"[Backend] Using personalized threshold {threshold:.3f} for student {student_id}")
+            print(f"[Backend] Retrieved personalized threshold {threshold:.3f} for {student_id}")
             return threshold
-        
-        print(f"[Backend] No personalized threshold found for student {student_id}, using default")
-        return DEFAULT_THRESHOLD
+        else:
+            print(f"[Backend] No personalized threshold found → using default {DEFAULT_THRESHOLD}")
+            return DEFAULT_THRESHOLD
     except Exception as e:
         print(f"[Backend] Error fetching threshold: {e}")
         return DEFAULT_THRESHOLD
+
+@app.route('/threshold', methods=['GET'])
+def get_personal_threshold():
+    student_id = request.args.get("student_id")
+    threshold = get_user_threshold(student_id)
+    return jsonify({"threshold": threshold})
 
 def extract_features_from_metrics(metrics, metric_type):
     """
@@ -371,6 +322,15 @@ def log_cheating_incident(session_id, fusion_score, mouse_features, keystroke_fe
         print(f"[Backend] Logged cheating incident for session {session_id} (severity: {severity})")
     except Exception as e:
         print(f"[Backend] Error logging incident: {e}")
+
+from routes.predict_route import predict_bp
+app.register_blueprint(predict_bp)
+
+from routes.threshold_route import threshold_bp
+app.register_blueprint(threshold_bp)
+
+from routes.calibration_route import calibration_bp
+app.register_blueprint(calibration_bp)
 
 @app.route("/predict", methods=["POST"])
 def predict():
@@ -561,7 +521,7 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/calibration/compute-threshold", methods=["POST"])
-def compute_threshold():
+def calibration_compute_threshold():
     """
     Compute personalized threshold from calibration session data.
     NOW PROPERLY COMPUTES FUSED SCORES from both models when available.

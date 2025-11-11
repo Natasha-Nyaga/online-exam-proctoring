@@ -18,42 +18,5 @@ const keystrokeFeatureNames = [
 ];
 
 export default function MLMonitorExample() {
-  const [backendResult, setBackendResult] = useState(null);
-  const [error, setError] = useState(null);
-
-  // Dummy feature arrays for testing
-  const mouse_features = Array(mouseFeatureNames.length).fill(0.5);
-  const keystroke_features = Array(keystrokeFeatureNames.length).fill(0.5);
-
-  // Send to backend on mount (for demo)
-  useEffect(() => {
-    fetch("http://127.0.0.1:5000/predict", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mouse_features, keystroke_features })
-    })
-      .then(res => res.json())
-      .then(data => setBackendResult(data))
-      .catch(err => setError(err.message));
-  }, []);
-
-  return (
-    <div style={{ padding: 20 }}>
-      <h2>ML Cheating Detection Test</h2>
-      <p>Mouse features: {JSON.stringify(mouse_features)}</p>
-      <p>Keystroke features: {JSON.stringify(keystroke_features)}</p>
-      {backendResult && (
-        <div>
-          <h3>Backend Response:</h3>
-          <pre>{JSON.stringify(backendResult, null, 2)}</pre>
-        </div>
-      )}
-      {error && (
-        <div style={{ color: "red" }}>
-          <h3>Error:</h3>
-          <pre>{error}</pre>
-        </div>
-      )}
-    </div>
-  );
+  return null;
 }

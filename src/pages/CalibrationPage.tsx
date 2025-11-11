@@ -221,7 +221,7 @@ const CalibrationPage = () => {
             console.log("[CalibrationPage] Personalized threshold computed:", result);
             toast({
               title: "Calibration completed!",
-              description: `Your personalized threshold (${result.threshold.toFixed(3)}) has been computed from ${result.samples_processed} samples.`,
+              description: `Your personalized threshold (${result.threshold?.toFixed(3)}) has been computed.`,
               className: "bg-success text-success-foreground",
             });
           } else {
