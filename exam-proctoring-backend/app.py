@@ -287,10 +287,8 @@ def predict():
     """
     try:
         data = request.get_json()
-        
         if not data:
             return jsonify({"error": "No data provided"}), 400
-        
 
         # Simulation mode: inject cheating or normal patterns
         simulation = data.get("simulation_mode", None)
@@ -298,8 +296,8 @@ def predict():
             sim_type = simulation if simulation in ["cheating", "normal"] else "cheating"
             print(f"[Backend] SIMULATION MODE ACTIVE: {sim_type}")
             mouse_features, keystroke_features = generate_simulated_features(sim_type)
-            student_id = student_id or "SIM_USER"
-            session_id = session_id or "SIM_SESSION"
+            student_id = data.get("student_id") or "SIM_USER"
+            session_id = data.get("session_id") or "SIM_SESSION"
         else:
             # Extract features from request
             mouse_features_dict = data.get("mouse_features", {})
@@ -328,7 +326,6 @@ def predict():
         print(f"  Mouse values (first 5): {mouse_features[0][:5]}")
         print(f"  Keystroke shape: {keystroke_features.shape}, sum: {np.sum(keystroke_features):.4f}")
         print(f"  Keystroke values (first 5): {keystroke_features[0][:5]}")
-        
 
         # Validate model/scaler shapes
         expected_mouse_features = mouse_scaler.n_features_in_
@@ -338,7 +335,6 @@ def predict():
             print(f"[Backend] WARNING: Mouse feature count mismatch! Expected {expected_mouse_features}, got {mouse_features.shape[1]}")
         if keystroke_features.shape[1] != expected_keystroke_features:
             print(f"[Backend] WARNING: Keystroke feature count mismatch! Expected {expected_keystroke_features}, got {keystroke_features.shape[1]}")
-        
 
         # SAFEGUARD: Skip prediction if both feature arrays are zero or near-zero (idle state)
         mouse_sum = np.sum(np.abs(mouse_features))
@@ -354,34 +350,30 @@ def predict():
                 "keystroke_probability": 0.0,
                 "status": "idle"
             })
-        
 
-    # Scale features
-    mouse_scaled = mouse_scaler.transform(mouse_features)
-    keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+        # Scale features
+        mouse_scaled = mouse_scaler.transform(mouse_features)
+        keystroke_scaled = keystroke_scaler.transform(keystroke_features)
 
-    print(f"[Backend] Scaled features:")
-    print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
-    print(f"  Mouse scaled (mean, std): {np.mean(mouse_scaled):.4f}, {np.std(mouse_scaled):.4f}")
-    print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
-    print(f"  Keystroke scaled (mean, std): {np.mean(keystroke_scaled):.4f}, {np.std(keystroke_scaled):.4f}")
-        
+        print(f"[Backend] Scaled features:")
+        print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
+        print(f"  Mouse scaled (mean, std): {np.mean(mouse_scaled):.4f}, {np.std(mouse_scaled):.4f}")
+        print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
+        print(f"  Keystroke scaled (mean, std): {np.mean(keystroke_scaled):.4f}, {np.std(keystroke_scaled):.4f}")
 
-    # Get predictions from both models
-    p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
-    p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
+        # Get predictions from both models
+        p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
+        p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
 
-    print(f"[Backend] Individual model probabilities:")
-    print(f"  Mouse probability: {p_mouse:.4f}")
-    print(f"  Keystroke probability: {p_keystroke:.4f}")
-        
+        print(f"[Backend] Individual model probabilities:")
+        print(f"  Mouse probability: {p_mouse:.4f}")
+        print(f"  Keystroke probability: {p_keystroke:.4f}")
 
-    # Fusion: weighted average optimized to minimize false positives
-    fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
+        # Fusion: weighted average optimized to minimize false positives
+        fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
 
-    print(f"[Backend] Fusion calculation:")
-    print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
-        
+        print(f"[Backend] Fusion calculation:")
+        print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
 
         # Get adaptive threshold for this user
         user_threshold = get_user_threshold(student_id)
@@ -406,7 +398,7 @@ def predict():
         else:
             cheating_prediction = 0
             status = "normal"
-        
+
         print(f"[Backend] FINAL RESULT:")
         print(f"  Fusion Score: {fusion_score:.4f}")
         print(f"  User Threshold: {user_threshold:.4f}")
@@ -414,7 +406,7 @@ def predict():
         print(f"  Status: {status.upper()}")
         print(f"  Cheating Prediction: {cheating_prediction} ({'FLAGGED' if cheating_prediction else 'NOT FLAGGED'})")
         print(f"{'='*60}\n")
-        
+
         # Log to Supabase if cheating detected
         if cheating_prediction == 1 and session_id:
             log_cheating_incident(
@@ -425,7 +417,7 @@ def predict():
                 mouse_prob=p_mouse,
                 keystroke_prob=p_keystroke
             )
-        
+
         return jsonify({
             "fusion_score": float(fusion_score),
             "cheating_prediction": cheating_prediction,
@@ -434,7 +426,6 @@ def predict():
             "keystroke_probability": float(p_keystroke),
             "status": status
         })
-        
     except Exception as e:
         print(f"[Backend] PREDICTION ERROR: {e}")
         import traceback
