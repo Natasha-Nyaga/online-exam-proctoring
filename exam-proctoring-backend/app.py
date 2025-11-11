@@ -349,8 +349,6 @@ def predict():
         expected_mouse_features = mouse_scaler.n_features_in_
         expected_keystroke_features = keystroke_scaler.n_features_in_
 
-=======
-=======
         if mouse_features.shape[1] != expected_mouse_features:
             print(f"[Backend] WARNING: Mouse feature count mismatch! Expected {expected_mouse_features}, got {mouse_features.shape[1]}")
         if keystroke_features.shape[1] != expected_keystroke_features:
