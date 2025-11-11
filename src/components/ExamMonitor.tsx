@@ -258,20 +258,6 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
   }, []);
 
   return (
-<<<<<<< HEAD
-    <div className="p-4 bg-white rounded-xl shadow-md mt-4">
-      <h2 className="font-semibold text-lg mb-2">Exam Behaviour Monitor</h2>
-      <div className="mb-2">Session ID: {sessionId || "-"}</div>
-      <div className="mb-2">
-        Threshold: {typeof threshold === "number" ? threshold.toFixed(3) : "-"}
-      </div>
-      <div className="mb-2">
-        Fusion Score: {typeof fusionScore === "number" ? fusionScore.toFixed(3) : "-"}
-      </div>
-      <div className="mb-2">Status: {status}</div>
-      <div className="mb-2">
-        Buffered: {buffered.map((b) => (b ? "🚨" : "✅")).join(" ")}
-=======
     <div className="p-4 bg-card rounded-xl shadow-md mt-4 border border-border relative">
       {simulationMode && (
         <Badge variant="destructive" className="absolute top-2 right-2 animate-pulse">
@@ -328,7 +314,6 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
             ))}
           </span>
         </div>
->>>>>>> f892a070a4167dfe627c824c8e317c98f795c7ec
       </div>
     </div>
   );
