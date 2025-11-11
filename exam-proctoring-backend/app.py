@@ -16,9 +16,19 @@ import random
 
 # Load environment variables from .env in project root
 load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# Also check for backend-specific .env
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
 
 app = Flask(__name__)
-CORS(app)
+# Enhanced CORS configuration for better cross-origin support
+CORS(app, resources={
+    r"/*": {
+        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"],
+        "supports_credentials": True
+    }
+})
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("VITE_SUPABASE_URL")
@@ -116,20 +126,27 @@ def generate_simulated_features(mode="cheating"):
     )
 
 # Test mode: bypass scaling if models output constant probabilities
-TEST_MODE_BYPASS_SCALING = False  # Set to True for debugging scaling issues
+TEST_MODE_BYPASS_SCALING = os.getenv("TEST_MODE_BYPASS_SCALING", "false").lower() == "true"
 
-# Expected feature ranges (based on training data)
+# Expected feature ranges (based on training data) - updated for realistic testing
 EXPECTED_RANGES = {
     "mouse": {
         "path_length": (800, 8000),
         "avg_speed": (1.5, 12.0),
         "click_frequency": (0.2, 2.0),
-        "hover_time": (0.05, 1.5)
+        "hover_time": (0.05, 1.5),
+        "idle_time": (0, 5),
+        "dwell_time": (0.5, 3.0),
+        "trajectory_smoothness": (0.2, 1.5),
+        "path_curvature": (0, 2.0)
     },
     "keystroke": {
         "typing_speed": (1.8, 8.0),
         "digraph_mean": (100, 600),
-        "error_rate": (0.01, 0.25)
+        "error_rate": (0.01, 0.25),
+        "digraph_variance": (50, 200),
+        "trigraph_mean": (150, 500),
+        "trigraph_variance": (50, 200)
     }
 }
 
@@ -611,6 +628,39 @@ def compute_threshold():
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
+@app.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint to verify backend is running"""
+    return jsonify({
+        "status": "healthy",
+        "models_loaded": True,
+        "timestamp": datetime.utcnow().isoformat(),
+        "test_mode": TEST_MODE_BYPASS_SCALING,
+        "default_threshold": DEFAULT_THRESHOLD
+    }), 200
+
+@app.route("/", methods=["GET"])
+def root():
+    """Root endpoint with API info"""
+    return jsonify({
+        "name": "Exam Proctoring ML Backend",
+        "version": "2.0",
+        "endpoints": {
+            "health": "/health",
+            "predict": "/predict (POST)",
+            "calibration": "/calibration/compute-threshold (POST)"
+        },
+        "status": "online"
+    }), 200
+
 if __name__ == "__main__":
     port = int(os.getenv("FLASK_PORT", 5000))
+    print(f"\n{'='*60}")
+    print(f"🚀 Exam Proctoring Backend Starting")
+    print(f"{'='*60}")
+    print(f"📍 Host: 0.0.0.0")
+    print(f"🔌 Port: {port}")
+    print(f"🧪 Test Mode: {TEST_MODE_BYPASS_SCALING}")
+    print(f"🎯 Default Threshold: {DEFAULT_THRESHOLD}")
+    print(f"{'='*60}\n")
     app.run(host="0.0.0.0", port=port, debug=True)

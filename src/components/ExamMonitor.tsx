@@ -202,7 +202,9 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
     const keystroke_features_obj = extractKeystrokeFeatures();
     console.log("[ExamMonitor] Sending to /predict", { studentId, sessionId, mouse_features_obj, keystroke_features_obj });
     try {
-      const r = await fetch("http://127.0.0.1:5000/predict", {
+      // Use environment variable or fallback to localhost
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
+      const r = await fetch(`${backendUrl}/predict`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
