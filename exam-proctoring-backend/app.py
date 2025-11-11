@@ -1,6 +1,61 @@
-# Real-time Cheating Detection Backend
-# Flask + CORS + Supabase + ML models
-# Implements calibration, prediction, buffered alerts, and personalized thresholds
+
+# ...existing code...
+
+import os
+from dotenv import load_dotenv
+from pathlib import Path
+import joblib
+import numpy as np
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from supabase import create_client, Client
+from datetime import datetime
+import random
+
+# Load environment variables from .env in project root
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# Also check for backend-specific .env
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+app = Flask(__name__)
+# Enhanced CORS configuration for better cross-origin support
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:8080"
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
+        "supports_credentials": True
+    }
+})
+
+# Initialize Supabase client
+SUPABASE_URL = os.getenv("VITE_SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
+
+# Place this route after app = Flask(__name__) and CORS setup
+@app.route("/get-threshold", methods=["GET"])
+def get_threshold():
+    student_id = request.args.get("student_id")
+    if not student_id:
+        return jsonify({"error": "student_id required"}), 400
+    try:
+        if supabase:
+            result = supabase.table('personal_thresholds')\
+                .select('threshold')\
+                .eq('student_id', student_id)\
+                .order('created_at', desc=True)\
+                .limit(1)\
+                .execute()
+            if result.data and len(result.data) > 0:
+                return jsonify({"threshold": float(result.data[0]['threshold'])})
+        # fallback to default
+        return jsonify({"threshold": DEFAULT_THRESHOLD})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 import os
@@ -23,9 +78,12 @@ app = Flask(__name__)
 # Enhanced CORS configuration for better cross-origin support
 CORS(app, resources={
     r"/*": {
-        "origins": ["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"],
+        "origins": [
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:8080"
+        ],
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With"],
         "supports_credentials": True
     }
 })
@@ -336,7 +394,13 @@ def predict():
         else:
             # Extract features from request
             mouse_features_dict = data.get("mouse_features", {})
+            if isinstance(mouse_features_dict, list):
+                mouse_features_dict = dict(zip(MOUSE_FEATURE_ORDER, mouse_features_dict))
+
             keystroke_features_dict = data.get("keystroke_features", {})
+            if isinstance(keystroke_features_dict, list):
+                keystroke_features_dict = dict(zip(KEYSTROKE_FEATURE_ORDER, keystroke_features_dict))
+
             student_id = data.get("student_id")
             session_id = data.get("session_id")
 
@@ -362,7 +426,35 @@ def predict():
         print(f"  Keystroke shape: {keystroke_features.shape}, sum: {np.sum(keystroke_features):.4f}")
         print(f"  Keystroke values (first 5): {keystroke_features[0][:5]}")
 
-        # Validate model/scaler shapes
+        print("[DEBUG] BEFORE SCALING")
+        print("  mouse_features raw:", mouse_features.tolist())
+        print("  keystroke_features raw:", keystroke_features.tolist())
+
+        print("[DEBUG] scaler expectations: mouse:", getattr(mouse_scaler,'n_features_in_',None),
+              "keystroke:", getattr(keystroke_scaler,'n_features_in_',None))
+
+        try:
+            mouse_scaled = mouse_scaler.transform(mouse_features)
+            keystroke_scaled = keystroke_scaler.transform(keystroke_features)
+        except Exception as ex:
+            print("[DEBUG] Scaler.transform ERROR:", ex)
+            mouse_scaled = mouse_features.copy()
+            keystroke_scaled = keystroke_features.copy()
+
+        print("[DEBUG] AFTER SCALING (first 8 values)")
+        print("  mouse_scaled:", mouse_scaled[0][:8].tolist(), "min,max:", float(mouse_scaled.min()), float(mouse_scaled.max()))
+        print("  keystroke_scaled:", keystroke_scaled[0][:8].tolist(), "min,max:", float(keystroke_scaled.min()), float(keystroke_scaled.max()))
+
+        try:
+            p_mouse = float(mouse_model.predict_proba(mouse_scaled)[0][1])
+            p_keystroke = float(keystroke_model.predict_proba(keystroke_scaled)[0][1])
+        except Exception as ex:
+            print("[DEBUG] model.predict_proba ERROR:", ex)
+            p_mouse = 0.5
+            p_keystroke = 0.5
+
+        print(f"[DEBUG] model probs p_mouse={p_mouse:.4f}, p_keystroke={p_keystroke:.4f}")
+
         expected_mouse_features = mouse_scaler.n_features_in_
         expected_keystroke_features = keystroke_scaler.n_features_in_
 
@@ -371,15 +463,13 @@ def predict():
         if keystroke_features.shape[1] != expected_keystroke_features:
             print(f"[Backend] WARNING: Keystroke feature count mismatch! Expected {expected_keystroke_features}, got {keystroke_features.shape[1]}")
 
-        # Flexible idle detection and debug logging
         mouse_sum = np.sum(np.abs(mouse_features))
         keystroke_sum = np.sum(np.abs(keystroke_features))
         print(f"[Backend] Feature activity check:")
         print(f"  Mouse sum: {mouse_sum:.6f}")
         print(f"  Keystroke sum: {keystroke_sum:.6f}")
-        # More flexible: allow one modality to be active
-        if mouse_sum < 0.0001 and keystroke_sum < 0.0001:
-            print(f"[Backend] IDLE STATE - Both modalities inactive (sums < 0.0001)")
+        if mouse_sum == 0 and keystroke_sum == 0:
+            print(f"[Backend] IDLE STATE - Both modalities inactive (sums == 0)")
             print(f"{'='*60}\n")
             return jsonify({
                 "fusion_score": 0.0,
@@ -389,12 +479,10 @@ def predict():
                 "keystroke_probability": 0.0,
                 "status": "idle"
             })
-        # Warn if only one modality is active
         if mouse_sum < 0.0001:
             print(f"[Backend] WARNING: Mouse features near zero, using keystroke only")
         if keystroke_sum < 0.0001:
             print(f"[Backend] WARNING: Keystroke features near zero, using mouse only")
-        # Scale features (or bypass in test mode)
         if TEST_MODE_BYPASS_SCALING:
             print(f"[Backend] TEST MODE: Bypassing scaling for debugging")
             mouse_scaled = mouse_features
@@ -407,36 +495,29 @@ def predict():
         print(f"  Mouse scaled min/max: [{np.min(mouse_scaled):.4f}, {np.max(mouse_scaled):.4f}]")
         print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
         print(f"  Keystroke scaled min/max: [{np.min(keystroke_scaled):.4f}, {np.max(keystroke_scaled):.4f}]")
-        # Get predictions from both models
         p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
         p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
         print(f"[Backend] Individual model probabilities:")
         print(f"  Mouse probability: {p_mouse:.4f}")
         print(f"  Keystroke probability: {p_keystroke:.4f}")
-        # SAFEGUARD: Detect if models output constant probabilities
         if abs(p_mouse - 0.5) < 0.01 and abs(p_keystroke - 0.5) < 0.01:
             print(f"[Backend] WARNING: Both models near 0.5 - possible scaling/feature issue!")
             print(f"[Backend] TIP: Set TEST_MODE_BYPASS_SCALING=True to debug")
-        # Fusion: weighted average optimized to minimize false positives
         fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
 
         print(f"[Backend] Fusion calculation:")
         print(f"  ({MOUSE_WEIGHT} * {p_mouse:.4f}) + ({KEYSTROKE_WEIGHT} * {p_keystroke:.4f}) = {fusion_score:.4f}")
 
-        # Get adaptive threshold for this user
         user_threshold = get_user_threshold(student_id)
 
-        # If model outputs are too low overall, lower the threshold
         if fusion_score < 0.45 and user_threshold > 0.45:
             print(f"[Backend] Lowering threshold to 0.45 due to low fusion score")
             user_threshold = 0.45
 
-        # Define gray zone boundaries
         GRAY_ZONE_MARGIN = 0.05
         lower_bound = user_threshold - GRAY_ZONE_MARGIN
         upper_bound = user_threshold + GRAY_ZONE_MARGIN
 
-        # Determine prediction status with gray zone
         if fusion_score > upper_bound:
             cheating_prediction = 1
             status = "flagged"
@@ -455,7 +536,6 @@ def predict():
         print(f"  Cheating Prediction: {cheating_prediction} ({'FLAGGED' if cheating_prediction else 'NOT FLAGGED'})")
         print(f"{'='*60}\n")
 
-        # Log to Supabase if cheating detected
         if cheating_prediction == 1 and session_id:
             log_cheating_incident(
                 session_id=session_id,

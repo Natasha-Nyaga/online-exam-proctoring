@@ -1,3 +1,8 @@
+const PREDICT_INTERVAL_MS = 10000; // 10s (you can reduce to 5000 for testing)
+const KEEP_MS = 30_000;            // keep last 30s of raw events (sliding window)
+const MIN_EVENTS_MOUSE = 2;        // minimum samples to compute mouse-derived features
+const MIN_EVENTS_KEYS = 1;         // minimum key downs to compute typing features
+
 import { useState, useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -20,144 +25,203 @@ const KEYSTROKE_FEATURE_ORDER = [
 ];
 
 function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: string }) {
+  // Step 1: Add browser event logging for verification
+  useEffect(() => {
+    window.addEventListener("mousemove", e => console.log("MOVE", e.clientX, e.clientY));
+    window.addEventListener("click", e => console.log("CLICK"));
+    window.addEventListener("keydown", e => console.log("DOWN", e.key));
+    return () => {
+      window.removeEventListener("mousemove", e => console.log("MOVE", e.clientX, e.clientY));
+      window.removeEventListener("click", e => console.log("CLICK"));
+      window.removeEventListener("keydown", e => console.log("DOWN", e.key));
+    };
+  }, []);
   const [mouseData, setMouseData] = useState<any[]>([]);
   const [keyData, setKeyData] = useState<any[]>([]);
   const [fusionScore, setFusionScore] = useState<number | null>(null);
   const [status, setStatus] = useState<string>("Collecting");
-  const [threshold, setThreshold] = useState<number | null>(null);
+  const [threshold, setThreshold] = useState<number>(0.85); // default
   const [buffered, setBuffered] = useState<boolean[]>([]);
   const [simulationMode, setSimulationMode] = useState<boolean>(false);
   const simulationIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // --- Fetch Personalized Threshold on Mount ---
   useEffect(() => {
-    const handleMove = (e: MouseEvent) =>
-      setMouseData((p) => [...p, { x: e.clientX, y: e.clientY, t: Date.now() }]);
-    const handleClick = (e: MouseEvent) =>
-      setMouseData((p) => [...p, { click: true, t: Date.now() }]);
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("click", handleClick);
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("click", handleClick);
-    };
-  }, []);
-
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      setKeyData((p) => [...p, { key: e.key, t: Date.now(), type: "down" }]);
-      
-      // Detect suspicious shortcuts
-      const isSuspicious = 
-        (e.ctrlKey && e.key === 'c') || // Ctrl+C
-        (e.ctrlKey && e.key === 'v') || // Ctrl+V
-        (e.ctrlKey && e.shiftKey && e.key === 'C') || // Ctrl+Shift+C
-        (e.altKey && e.key === 'Tab') || // Alt+Tab
-        (e.metaKey && e.key === 'Tab') || // Command+Tab
-        e.key === 'PrintScreen';
-      
-      if (isSuspicious) {
-        const shortcut = e.ctrlKey ? `Ctrl+${e.key}` : 
-                        e.altKey ? `Alt+${e.key}` :
-                        e.metaKey ? `Cmd+${e.key}` :
-                        e.key;
-        console.log(`[ExamMonitor] Suspicious shortcut detected: ${shortcut}`);
-        handleSuspiciousShortcut(shortcut);
+    async function fetchThreshold() {
+      try {
+        const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
+        const res = await fetch(`${backendUrl}/get-threshold?student_id=${studentId}`);
+        if (!res.ok) throw new Error("No threshold found");
+        const data = await res.json();
+        if (data?.threshold) {
+          setThreshold(data.threshold);
+          console.log("[ExamMonitor] Loaded personalized threshold:", data.threshold);
+        }
+      } catch (err) {
+        console.warn("[ExamMonitor] Using default threshold (0.85)");
       }
-    };
-    
-    const up = (e: KeyboardEvent) =>
-      setKeyData((p) => [...p, { key: e.key, t: Date.now(), type: "up" }]);
-    window.addEventListener("keydown", down);
-    window.addEventListener("keyup", up);
-    return () => {
-      window.removeEventListener("keydown", down);
-      window.removeEventListener("keyup", up);
-    };
-  }, []);
-
-  const extractMouseFeatures = () => {
-    let path_length = 0, total_time = 0, clicks = 0;
-    for (let i = 1; i < mouseData.length; i++) {
-      const dx = mouseData[i].x - mouseData[i - 1].x;
-      const dy = mouseData[i].y - mouseData[i - 1].y;
-      const dt = (mouseData[i].t - mouseData[i - 1].t) / 1000;
-      if (dt > 0) {
-        path_length += Math.hypot(dx, dy);
-        total_time += dt;
-      }
-      if (mouseData[i].click) clicks++;
     }
-    const avg_speed = total_time > 0 ? path_length / total_time : 0;
-    const click_frequency = total_time > 0 ? clicks / total_time : 0;
-    console.log("[ExamMonitor] Mouse features:", { path_length, avg_speed, click_frequency });
-    return {
-      path_length,
-      avg_speed,
-      idle_time: 0,
-      dwell_time: 0,
-      hover_time: 0,
-      click_frequency,
-      click_interval_mean: 0,
-      click_ratio_per_question: 0,
-      trajectory_smoothness: 0,
-      path_curvature: 0,
-      transition_time: 0,
-    };
-  };
+    fetchThreshold();
+  }, [studentId]);
 
+  // --- Capture mouse and keyboard data ---
+  // ------------------- REAL-TIME BEHAVIOR CAPTURE -------------------
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setMouseData(prev => [
+        ...prev.slice(-500), // keep last 500 points
+        { x: e.clientX, y: e.clientY, t: Date.now() }
+      ]);
+    };
+
+    const handleClick = () => {
+      setMouseData(prev => [
+        ...prev.slice(-500),
+        { type: "click", t: Date.now() }
+      ]);
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      setKeyData(prev => [
+        ...prev.slice(-200),
+        { key: e.key, action: "down", t: Date.now() }
+      ]);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("click", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("click", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, []);
+
+  // --- Extract meaningful mouse features ---
+const extractMouseFeatures = () => {
+  const now = Date.now();
+  // Use only recent events within KEEP_MS sliding window
+  const windowStart = now - KEEP_MS;
+  const recent = mouseData.filter((m) => (m.t || 0) >= windowStart);
+
+  // small-sample safety:
+  if (!recent || recent.length < MIN_EVENTS_MOUSE) {
+    // quickly compute something non-zero when we have at least some movement
+    const anyMove = mouseData.find((m) => m.type === "move");
+    if (!anyMove) {
+      return Object.fromEntries(MOUSE_FEATURE_ORDER.map((k) => [k, 0]));
+    }
+  }
+
+  let path_length = 0;
+  let total_time_s = 0;
+  let clicks = 0;
+  let lastTs = null;
+
+  for (let i = 0; i < recent.length; i++) {
+    const cur = recent[i];
+    if (cur.type === "move" && i > 0) {
+      const prev = recent[i - 1];
+      if (typeof prev.x === "number" && typeof prev.y === "number" &&
+          typeof cur.x === "number" && typeof cur.y === "number") {
+        const dx = cur.x - prev.x;
+        const dy = cur.y - prev.y;
+        path_length += Math.hypot(dx, dy);
+      }
+    }
+    if (lastTs != null && cur.t && lastTs < cur.t) {
+      total_time_s += (cur.t - lastTs) / 1000;
+    }
+    if (cur.click) clicks++;
+    lastTs = cur.t || lastTs;
+  }
+
+  const avg_speed = total_time_s > 0 ? path_length / total_time_s : 0;
+  const click_frequency = total_time_s > 0 ? clicks / total_time_s : 0;
+
+  // click_interval_mean: compute from click timestamps if available
+  const clickTimes = recent.filter((r) => r.click).map((c) => c.t).sort((a,b)=>a-b);
+  let click_interval_mean = 0;
+  if (clickTimes.length > 1) {
+    const intervals = [];
+    for (let i = 1; i < clickTimes.length; i++) intervals.push((clickTimes[i] - clickTimes[i-1]) / 1000);
+    click_interval_mean = intervals.length ? (intervals.reduce((a,b)=>a+b,0) / intervals.length) : 0;
+  }
+
+  // Build object guaranteeing all keys exist
+  const out = {
+    path_length,
+    avg_speed,
+    idle_time: 0,
+    dwell_time: 0,
+    hover_time: 0,
+    click_frequency,
+    click_interval_mean,
+    click_ratio_per_question: 0,
+    trajectory_smoothness: 0,
+    path_curvature: 0,
+    transition_time: 0,
+  };
+  console.debug("[ExamMonitor] extractMouseFeatures ->", { recent_count: recent.length, ...out });
+  return out;
+};
+
+  // --- Extract meaningful keystroke features ---
+const extractKeystrokeFeatures = () => {
+  const now = Date.now();
+  const windowStart = now - KEEP_MS;
+  const recentDowns = keyData.filter(k => k.type === "down" && (k.t || 0) >= windowStart);
+  const recentUps = keyData.filter(k => k.type === "up" && (k.t || 0) >= windowStart);
+
+  // compute dwell times
+  const dwell_times: number[] = [];
+  for (let i = 0; i < recentDowns.length; i++) {
+    const d = recentDowns[i];
+    const up = recentUps.find(u => u.key === d.key && u.t > d.t);
+    if (up) dwell_times.push(up.t - d.t);
+  }
+
+  const typing_duration_s = recentDowns.length > 1 ? ((recentDowns[recentDowns.length - 1].t - recentDowns[0].t) / 1000) : 1;
+  const typing_speed = recentDowns.length / (typing_duration_s || 1);
+  const avg_hold = dwell_times.length ? dwell_times.reduce((a,b)=>a+b,0) / dwell_times.length : 0;
+
+  // Fill all keys with defaults then override a few core features
+  const features: Record<string, number> = {};
+  KEYSTROKE_FEATURE_ORDER.forEach((k) => { features[k] = 0; });
+
+  // set principal / robust features
+  features["typing_speed"] = typing_speed;
+  features["digraph_mean"] = dwell_times.length ? (dwell_times.reduce((a,b)=>a+b,0) / dwell_times.length) : 0;
+  features["digraph_variance"] = dwell_times.length > 1 ? (dwell_times.map(x=>Math.pow(x - features["digraph_mean"], 2)).reduce((a,b)=>a+b,0) / dwell_times.length) : 0;
+  features["error_rate"] = (recentDowns.filter(d => ["Backspace","Delete"].includes(d.key)).length) / Math.max(1, recentDowns.length);
+  features["H.period"] = avg_hold;
+  features["H.t"] = avg_hold;
+  features["H.i"] = avg_hold;
+  features["H.e"] = avg_hold;
+  // keep other keys zero if not available
+
+  console.debug("[ExamMonitor] extractKeystrokeFeatures ->", { downs: recentDowns.length, ups: recentUps.length, typing_speed, avg_hold });
+  return features;
+};
+
+  // --- Handle suspicious shortcut ---
   const handleSuspiciousShortcut = (shortcut: string) => {
     toast.warning(`⚠️ Suspicious action: ${shortcut}`);
-    
-    // Inject erratic typing pattern to spike the score
     const now = Date.now();
-    const burstKeys = ['a', 's', 'd', 'f', 'Backspace', 'Backspace', 'g', 'h'];
-    burstKeys.forEach((key, idx) => {
-      const delay = Math.random() * 50 + 20; // 20-70ms random delays
-      setKeyData((p) => [...p, 
-        { key, t: now + idx * delay, type: "down" },
-        { key, t: now + idx * delay + 30, type: "up" }
-      ]);
-    });
-    
-    // Inject jittery mouse movements
     for (let i = 0; i < 15; i++) {
       setMouseData((p) => [...p, {
         x: Math.random() * window.innerWidth,
         y: Math.random() * window.innerHeight,
-        t: now + i * 50
+        t: now + i * 50,
       }]);
     }
   };
 
-  const generateSimulatedData = () => {
-    const now = Date.now();
-    
-    // Generate rapid, jittery mouse movements
-    for (let i = 0; i < 20; i++) {
-      setMouseData((p) => [...p, {
-        x: Math.random() * window.innerWidth,
-        y: Math.random() * window.innerHeight,
-        t: now + i * 30,
-        ...(Math.random() > 0.7 ? { click: true } : {})
-      }]);
-    }
-    
-    // Generate bursts of erratic typing
-    const randomKeys = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
-    const burstLength = Math.floor(Math.random() * 15) + 10;
-    for (let i = 0; i < burstLength; i++) {
-      const key = Math.random() > 0.85 ? 'Backspace' : randomKeys[Math.floor(Math.random() * randomKeys.length)];
-      const irregularDelay = Math.random() * 150 + 30; // 30-180ms
-      setKeyData((p) => [...p,
-        { key, t: now + i * irregularDelay, type: "down" },
-        { key, t: now + i * irregularDelay + Math.random() * 100, type: "up" }
-      ]);
-    }
-  };
-
+  // --- Cheating simulation toggle ---
   const toggleSimulation = () => {
     if (simulationMode) {
-      // Stop simulation
       if (simulationIntervalRef.current) {
         clearInterval(simulationIntervalRef.current);
         simulationIntervalRef.current = null;
@@ -165,84 +229,99 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
       setSimulationMode(false);
       toast.info("✅ Simulation disabled");
     } else {
-      // Start simulation
       setSimulationMode(true);
       toast.warning("⚠️ Cheating simulation enabled");
-      
-      // Inject simulated data every 2 seconds
       simulationIntervalRef.current = setInterval(() => {
-        generateSimulatedData();
+        const now = Date.now();
+        for (let i = 0; i < 20; i++) {
+          setMouseData((p) => [...p, {
+            x: Math.random() * window.innerWidth,
+            y: Math.random() * window.innerHeight,
+            t: now + i * 30,
+            ...(Math.random() > 0.7 ? { click: true } : {}),
+          }]);
+        }
       }, 2000);
     }
   };
 
-  const extractKeystrokeFeatures = () => {
-    const downs = keyData.filter((d) => d.type === "down");
-    const ups = keyData.filter((d) => d.type === "up");
-    const dwell_times: number[] = [];
-    downs.forEach((d) => {
-      const u = ups.find((u) => u.key === d.key && u.t > d.t);
-      if (u) dwell_times.push(u.t - d.t);
-    });
-    const typing_duration =
-      downs.length > 1 ? (downs[downs.length - 1].t - downs[0].t) / 1000 : 1;
-    const typing_speed = downs.length / typing_duration;
-    const features: Record<string, number> = {};
-    KEYSTROKE_FEATURE_ORDER.forEach((key) => {
-      features[key] = 0;
-    });
-    features["typing_speed"] = typing_speed;
-    console.log("[ExamMonitor] Keystroke features:", features);
-    return features;
-  };
+  // --- Send features to backend ---
+const sendPredict = async () => {
+  // Diagnostic logs for buffer sizes and sample data
+  console.log("[ExamMonitor] Data buffer sizes", mouseData.length, keyData.length);
+  console.log("[ExamMonitor] Example mouseData:", mouseData.slice(-3));
+  console.log("[ExamMonitor] Example keyData:", keyData.slice(-3));
+  if (!studentId || !sessionId) return;
 
-  const sendPredict = async () => {
-    if (!studentId || !sessionId) return;
-    const mouse_features_obj = extractMouseFeatures();
-    const keystroke_features_obj = extractKeystrokeFeatures();
-    console.log("[ExamMonitor] Sending to /predict", { studentId, sessionId, mouse_features_obj, keystroke_features_obj });
-    try {
-      // Use environment variable or fallback to localhost
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
-      const r = await fetch(`${backendUrl}/predict`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mouse_features: Object.fromEntries(
-            MOUSE_FEATURE_ORDER.map((f) => [f, mouse_features_obj[f]])
-          ),
-          keystroke_features: Object.fromEntries(
-            KEYSTROKE_FEATURE_ORDER.map((f) => [f, keystroke_features_obj[f]])
-          ),
-          student_id: studentId,
-          session_id: sessionId,
-        }),
-      });
-      const res = await r.json();
-      console.log("[ExamMonitor] /predict response:", res);
-      setFusionScore(res.fusion_score);
-      setThreshold(res.user_threshold);
-      setBuffered((prev) => {
-        const next = [...prev, res.fusion_score > res.user_threshold];
-        return next.length > 3 ? next.slice(-3) : next;
-      });
-      if (res.cheating_prediction) {
-        setStatus("🚨 Cheating incident recorded");
-        toast.error("🚨 Cheating incident recorded");
-      } else if (res.fusion_score > res.user_threshold) {
-        setStatus("⚠️ Suspicious");
-        toast.warning("Suspicious behaviour detected");
-      } else {
-        setStatus("✅ Normal");
-      }
-      setMouseData([]);
-      setKeyData([]);
-    } catch (err) {
-      console.error("[ExamMonitor] Prediction failed", err);
-      toast.error("Prediction failed");
+  // debug: counts before feature extraction
+  console.debug("[ExamMonitor] sendPredict — raw lengths", { mouseDataLen: mouseData.length, keyDataLen: keyData.length });
+
+  const mouse_features_obj = extractMouseFeatures();
+  const keystroke_features_obj = extractKeystrokeFeatures();
+
+  // debug: show exactly what will be sent
+  console.log("[ExamMonitor] Sending to /predict", {
+    studentId, sessionId,
+    mouse_features_obj_sample: Object.fromEntries(MOUSE_FEATURE_ORDER.map((f)=>[f, mouse_features_obj[f]])),
+    keystroke_features_obj_sample: Object.fromEntries(KEYSTROKE_FEATURE_ORDER.map((f)=>[f, keystroke_features_obj[f]])),
+  });
+
+  try {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
+    const r = await fetch(`${backendUrl}/predict`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mouse_features: Object.fromEntries(MOUSE_FEATURE_ORDER.map((f) => [f, mouse_features_obj[f] ?? 0])),
+        keystroke_features: Object.fromEntries(KEYSTROKE_FEATURE_ORDER.map((f) => [f, keystroke_features_obj[f] ?? 0])),
+        student_id: studentId,
+        session_id: sessionId,
+      }),
+    });
+
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(`Backend error ${r.status}: ${txt}`);
     }
-  };
+    const res = await r.json();
+    console.log("[ExamMonitor] /predict response:", res);
 
+    setFusionScore(res.fusion_score);
+    setThreshold(res.user_threshold ?? threshold);
+    const flagged = !!res.cheating_prediction;
+
+    setBuffered(prev => {
+      const next = [...prev, flagged];
+      return next.length > 3 ? next.slice(-3) : next;
+    });
+
+    if (flagged) {
+      setStatus("🚨 Cheating incident recorded");
+      toast.error("🚨 Cheating incident recorded");
+    } else if (res.fusion_score > (res.user_threshold ?? threshold)) {
+      setStatus("⚠️ Suspicious");
+      toast.warning("Suspicious behaviour detected");
+    } else {
+      setStatus("✅ Normal");
+    }
+
+  // Keep rolling window of last 5s of history
+  const keepFrom = Date.now() - 5000;
+  setMouseData(prev => prev.filter(d => d.t >= keepFrom));
+  setKeyData(prev => prev.filter(d => d.t >= keepFrom));
+  } catch (err) {
+    console.error("[ExamMonitor] Prediction failed", err);
+    toast.error("Prediction failed");
+  }
+};
+
+// Dev helper to manually trigger sendPredict from console
+(window as any).sendPredictNow = () => {
+  // call sendPredict - helpful for manual testing
+  (sendPredict as any)();
+};
+
+  // --- Schedule periodic predictions ---
   useEffect(() => {
     if (studentId && sessionId) {
       const interval = setInterval(sendPredict, 10000);
@@ -250,12 +329,10 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
     }
   }, [studentId, sessionId]);
 
+  // --- Cleanup ---
   useEffect(() => {
-    // Cleanup simulation on unmount
     return () => {
-      if (simulationIntervalRef.current) {
-        clearInterval(simulationIntervalRef.current);
-      }
+      if (simulationIntervalRef.current) clearInterval(simulationIntervalRef.current);
     };
   }, []);
 
@@ -296,11 +373,15 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Status:</span>
-          <span className={`font-medium ${
-            status.includes("🚨") ? "text-destructive" : 
-            status.includes("⚠️") ? "text-yellow-600 dark:text-yellow-500" : 
-            "text-green-600 dark:text-green-500"
-          }`}>
+          <span
+            className={`font-medium ${
+              status.includes("🚨")
+                ? "text-destructive"
+                : status.includes("⚠️")
+                ? "text-yellow-600 dark:text-yellow-500"
+                : "text-green-600 dark:text-green-500"
+            }`}
+          >
             {status}
           </span>
         </div>
