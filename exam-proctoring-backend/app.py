@@ -115,6 +115,24 @@ def generate_simulated_features(mode="cheating"):
         np.array(keystroke, dtype=float).reshape(1, -1)
     )
 
+# Test mode: bypass scaling if models output constant probabilities
+TEST_MODE_BYPASS_SCALING = False  # Set to True for debugging scaling issues
+
+# Expected feature ranges (based on training data)
+EXPECTED_RANGES = {
+    "mouse": {
+        "path_length": (800, 8000),
+        "avg_speed": (1.5, 12.0),
+        "click_frequency": (0.2, 2.0),
+        "hover_time": (0.05, 1.5)
+    },
+    "keystroke": {
+        "typing_speed": (1.8, 8.0),
+        "digraph_mean": (100, 600),
+        "error_rate": (0.01, 0.25)
+    }
+}
+
 def get_user_threshold(student_id):
     """Fetch personalized threshold from database or return default"""
     if not supabase or not student_id:
@@ -331,16 +349,22 @@ def predict():
         expected_mouse_features = mouse_scaler.n_features_in_
         expected_keystroke_features = keystroke_scaler.n_features_in_
 
+=======
+=======
         if mouse_features.shape[1] != expected_mouse_features:
             print(f"[Backend] WARNING: Mouse feature count mismatch! Expected {expected_mouse_features}, got {mouse_features.shape[1]}")
         if keystroke_features.shape[1] != expected_keystroke_features:
             print(f"[Backend] WARNING: Keystroke feature count mismatch! Expected {expected_keystroke_features}, got {keystroke_features.shape[1]}")
 
-        # SAFEGUARD: Skip prediction if both feature arrays are zero or near-zero (idle state)
+        # Flexible idle detection and debug logging
         mouse_sum = np.sum(np.abs(mouse_features))
         keystroke_sum = np.sum(np.abs(keystroke_features))
-        if mouse_sum < 0.001 and keystroke_sum < 0.001:
-            print(f"[Backend] IDLE STATE DETECTED - Skipping prediction (all features near zero)")
+        print(f"[Backend] Feature activity check:")
+        print(f"  Mouse sum: {mouse_sum:.6f}")
+        print(f"  Keystroke sum: {keystroke_sum:.6f}")
+        # More flexible: allow one modality to be active
+        if mouse_sum < 0.0001 and keystroke_sum < 0.0001:
+            print(f"[Backend] IDLE STATE - Both modalities inactive (sums < 0.0001)")
             print(f"{'='*60}\n")
             return jsonify({
                 "fusion_score": 0.0,
@@ -350,25 +374,34 @@ def predict():
                 "keystroke_probability": 0.0,
                 "status": "idle"
             })
-
-        # Scale features
-        mouse_scaled = mouse_scaler.transform(mouse_features)
-        keystroke_scaled = keystroke_scaler.transform(keystroke_features)
-
+        # Warn if only one modality is active
+        if mouse_sum < 0.0001:
+            print(f"[Backend] WARNING: Mouse features near zero, using keystroke only")
+        if keystroke_sum < 0.0001:
+            print(f"[Backend] WARNING: Keystroke features near zero, using mouse only")
+        # Scale features (or bypass in test mode)
+        if TEST_MODE_BYPASS_SCALING:
+            print(f"[Backend] TEST MODE: Bypassing scaling for debugging")
+            mouse_scaled = mouse_features
+            keystroke_scaled = keystroke_features
+        else:
+            mouse_scaled = mouse_scaler.transform(mouse_features)
+            keystroke_scaled = keystroke_scaler.transform(keystroke_features)
         print(f"[Backend] Scaled features:")
         print(f"  Mouse scaled (first 5): {mouse_scaled[0][:5]}")
-        print(f"  Mouse scaled (mean, std): {np.mean(mouse_scaled):.4f}, {np.std(mouse_scaled):.4f}")
+        print(f"  Mouse scaled min/max: [{np.min(mouse_scaled):.4f}, {np.max(mouse_scaled):.4f}]")
         print(f"  Keystroke scaled (first 5): {keystroke_scaled[0][:5]}")
-        print(f"  Keystroke scaled (mean, std): {np.mean(keystroke_scaled):.4f}, {np.std(keystroke_scaled):.4f}")
-
+        print(f"  Keystroke scaled min/max: [{np.min(keystroke_scaled):.4f}, {np.max(keystroke_scaled):.4f}]")
         # Get predictions from both models
         p_mouse = mouse_model.predict_proba(mouse_scaled)[0][1]
         p_keystroke = keystroke_model.predict_proba(keystroke_scaled)[0][1]
-
         print(f"[Backend] Individual model probabilities:")
         print(f"  Mouse probability: {p_mouse:.4f}")
         print(f"  Keystroke probability: {p_keystroke:.4f}")
-
+        # SAFEGUARD: Detect if models output constant probabilities
+        if abs(p_mouse - 0.5) < 0.01 and abs(p_keystroke - 0.5) < 0.01:
+            print(f"[Backend] WARNING: Both models near 0.5 - possible scaling/feature issue!")
+            print(f"[Backend] TIP: Set TEST_MODE_BYPASS_SCALING=True to debug")
         # Fusion: weighted average optimized to minimize false positives
         fusion_score = (MOUSE_WEIGHT * p_mouse) + (KEYSTROKE_WEIGHT * p_keystroke)
 
@@ -532,18 +565,27 @@ def compute_threshold():
         fusion_max = float(np.max(fusion_scores))
         
         # Compute adaptive threshold: mean + 1.25 * std (more sensitive than 2*std)
-        # Cap between 0.45 and 0.85 to prevent extreme values
+        # Cap between 0.35 and 0.85 for wider dynamic range
         adaptive_threshold = fusion_mean + (1.25 * fusion_std)
         adaptive_threshold = min(adaptive_threshold, 0.85)  # Cap at 0.85
-        adaptive_threshold = max(adaptive_threshold, 0.45)  # Floor at 0.45
+        adaptive_threshold = max(adaptive_threshold, 0.35)  # Floor at 0.35 (wider range)
         
         print(f"[Calibration] Statistics:")
         print(f"  Samples: {len(fusion_scores)}")
         print(f"  Mean: {fusion_mean:.4f}")
         print(f"  Std Dev: {fusion_std:.4f}")
-        print(f"  Score Range: [{fusion_min:.4f}, {fusion_max:.4f}]")
+        print(f"  Min Score: {fusion_min:.4f}")
+        print(f"  Max Score: {fusion_max:.4f}")
+        print(f"  Score Range Width: {fusion_max - fusion_min:.4f}")
         print(f"  Adaptive Threshold: {adaptive_threshold:.4f}")
-        print(f"  Formula: min(max({fusion_mean:.4f} + 1.25*{fusion_std:.4f}, 0.45), 0.85)")
+        print(f"  Formula: min(max({fusion_mean:.4f} + 1.25*{fusion_std:.4f}, 0.35), 0.85)")
+        
+        # Warn if scores are in narrow band (possible scaling issue)
+        score_range = fusion_max - fusion_min
+        if score_range < 0.1:
+            print(f"[Calibration] WARNING: Narrow score range ({score_range:.4f}) - check feature extraction!")
+        if fusion_mean > 0.9 or fusion_mean < 0.1:
+            print(f"[Calibration] WARNING: Extreme mean ({fusion_mean:.4f}) - possible data issue!")
         
         # Store in database
         supabase.table('personal_thresholds').insert({
