@@ -83,8 +83,7 @@ def set_threshold():
 @threshold_bp.route("/get-threshold", methods=["GET"])
 def get_threshold():
     """
-    Used during the actual exam session.
-    Returns the student's personalized threshold if it exists, else fallback to 0.85.
+    Returns both mouse and keystroke thresholds for a student, fallback to 0.85 if missing.
     """
     try:
         student_id = request.args.get("student_id")

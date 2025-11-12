@@ -34,7 +34,7 @@ def predict_behavior():
         import joblib
         from routes.threshold_route import load_thresholds_for
         data = request.get_json()
-        student_id = data.get("student_id")
+        student_id = data.get("studentId")
         question_type = data.get("questionType")
         mouse_features = data.get("mouse_features_obj_sample")
         key_features = data.get("keystroke_features_obj_sample")
@@ -53,34 +53,31 @@ def predict_behavior():
         if question_type == "mcq" and mouse_scaled is not None:
             p_mouse = float(mouse_model.predict_proba(mouse_scaled)[0][1])
             fusion_score = p_mouse
+            print(f"[Backend] Student {student_id} used MCQ (mouse) modality.")
         elif question_type == "essay" and key_scaled is not None:
             p_key = float(key_model.predict_proba(key_scaled)[0][1])
             fusion_score = p_key
+            print(f"[Backend] Student {student_id} used essay (keystroke) modality.")
         elif mouse_scaled is not None and key_scaled is not None:
             p_mouse = float(mouse_model.predict_proba(mouse_scaled)[0][1])
             p_key = float(key_model.predict_proba(key_scaled)[0][1])
-            fusion_score = (p_mouse + p_key) / 2
+            fusion_score = 0.5 * (p_mouse + p_key)
+            print(f"[Backend] Student {student_id} used fusion modality.")
 
         thresholds = load_thresholds_for(student_id)
         mouse_threshold = thresholds.get("mouse_threshold", 0.85)
         key_threshold = thresholds.get("keystroke_threshold", 0.85)
-        if question_type == "mcq":
-            flagged = fusion_score > mouse_threshold
-        elif question_type == "essay":
-            flagged = fusion_score > key_threshold
-        else:
-            flagged = fusion_score > np.mean([mouse_threshold, key_threshold])
+        threshold = mouse_threshold if question_type == "mcq" else key_threshold
+        flagged = int(fusion_score > threshold)
 
-        print(f"[Backend] Student {student_id} used {question_type} modality.")
-        print(f"[Backend] fusion_score={fusion_score:.2f} | mouse={p_mouse} | key={p_key} | thresholds: mouse={mouse_threshold}, key={key_threshold} | flagged={flagged}")
+        print(f"[Backend] fusion_score={fusion_score:.2f} | mouse={p_mouse} | key={p_key} | threshold={threshold} | flagged={flagged}")
 
         return jsonify({
-            "cheating_prediction": int(flagged),
+            "cheating_prediction": flagged,
             "fusion_score": fusion_score,
             "mouse_probability": p_mouse,
             "keystroke_probability": p_key,
-            "mouse_threshold": mouse_threshold,
-            "keystroke_threshold": key_threshold,
+            "threshold": threshold,
             "status": "active"
         })
     except Exception as e:

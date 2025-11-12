@@ -1,3 +1,68 @@
+import os
+from dotenv import load_dotenv
+from pathlib import Path
+import joblib
+import numpy as np
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from supabase import create_client, Client
+from datetime import datetime
+import random
+import json
+
+# Load environment variables from .env in project root
+load_dotenv(dotenv_path=Path(__file__).parent.parent / ".env")
+# Also check for backend-specific .env
+load_dotenv(dotenv_path=Path(__file__).parent / ".env")
+
+app = Flask(__name__)
+# Enhanced CORS configuration for better cross-origin support
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:5173", "http://127.0.0.1:5173",
+            "http://localhost:3000", "http://localhost:8080", "http://127.0.0.1:8080"
+        ]
+    }
+})
+
+# ...existing code...
+
+@app.route('/get-threshold', methods=['GET'])
+def get_threshold():
+    student_id = request.args.get('student_id')
+    if not student_id:
+        return jsonify({"error": "Missing student_id"}), 400
+
+    try:
+        # Fetch from Supabase
+        result = supabase.table("personal_thresholds").select(
+            "mouse_threshold, keystroke_threshold, fusion_mean"
+        ).eq("student_id", student_id).order("created_at", desc=True).limit(1).execute()
+
+        if not result.data or len(result.data) == 0:
+            print(f"[Backend] No personalized thresholds found for {student_id}")
+            return jsonify({
+                "mouse_threshold": 0.85,
+                "keystroke_threshold": 0.85,
+                "fusion_mean": 0.85
+            })
+
+        thresholds = result.data[0]
+        print(f"[Backend] Thresholds retrieved for {student_id}: mouse={thresholds.get('mouse_threshold')}, keystroke={thresholds.get('keystroke_threshold')}")
+        return jsonify({
+            "mouse_threshold": thresholds.get("mouse_threshold", 0.85),
+            "keystroke_threshold": thresholds.get("keystroke_threshold", 0.85),
+            "fusion_mean": thresholds.get("fusion_mean", 0.85)
+        })
+
+    except Exception as e:
+        print(f"[Backend] Error fetching thresholds: {str(e)}")
+        return jsonify({
+            "mouse_threshold": 0.85,
+            "keystroke_threshold": 0.85,
+            "fusion_mean": 0.85
+        }), 500
 # ...existing code...
 
 import os
