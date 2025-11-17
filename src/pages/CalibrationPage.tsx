@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
 import { useKeystrokeDynamics } from "@/hooks/useKeystrokeDynamics";
+import { extractKeystrokeVector, extractMouseVector } from "@/utils/featureExtractors";
 import { useMouseDynamics } from "@/hooks/useMouseDynamics";
 
 interface CalibrationQuestion { id: number; text: string; type: "essay" | "mcq"; options?: string[]; }
@@ -134,49 +135,39 @@ const CalibrationPage = () => {
 		setAnswers((prev) => ({ ...prev, [questionId]: answer }));
 	};
 
-	const saveBehavioralMetrics = async (questionIndex: number, metrics: any, questionType: "essay" | "mcq") => {
-		try {
-			console.log(`[CalibrationPage] Saving metrics for question ${questionIndex}:`, metrics);
-			if (!metrics || Object.keys(metrics).length === 0) {
-				console.warn(`[CalibrationPage] ⚠️ Empty metrics for question ${questionIndex}, skipping insert.`);
-				return;
-			}
-			const { data, error } = await supabase
-				.from("behavioral_metrics")
-				.insert([
-					{
-						calibration_session_id: sessionId,
-						student_id: (await supabase.auth.getSession()).data.session?.user.id,
-						question_index: questionIndex,
-						question_type: questionType,
-						metric_type: questionType === "essay" ? "keystroke" : "mouse",
-						metrics: metrics, // make sure this is JSON serializable
-					},
-				]);
-			if (error) {
-				console.error(`[CalibrationPage] ❌ Failed to insert metrics for question ${questionIndex}:`, error);
-			} else {
-				console.log(`[CalibrationPage] ✅ Metrics saved successfully for question ${questionIndex}`);
-			}
-		} catch (err) {
-			console.error(`[CalibrationPage] Unexpected error saving metrics:`, err);
+	const saveBehavioralMetrics = async (questionIndex: number) => {
+		if (!sessionId) return;
+		const current = CALIBRATION_QUESTIONS[questionIndex];
+		if (current.type === "essay") {
+			const rawEvents = keystrokeDynamics.keystrokeEvents.current || [];
+			const vector = extractKeystrokeVector(rawEvents);
+			await supabase.from("behavioral_metrics").insert({
+				calibration_session_id: sessionId,
+				student_id: (await supabase.auth.getSession()).data.session.user.id,
+				question_index: questionIndex,
+				question_type: "essay",
+				metric_type: "keystroke",
+				metrics: { vector, raw: rawEvents }
+			});
+			keystrokeDynamics.resetMetrics();
+		} else {
+			const raw = mouseDynamics.getCurrentMetrics();
+			const vector = extractMouseVector(raw.cursorPositions || []);
+			await supabase.from("behavioral_metrics").insert({
+				calibration_session_id: sessionId,
+				student_id: (await supabase.auth.getSession()).data.session.user.id,
+				question_index: questionIndex,
+				question_type: "mcq",
+				metric_type: "mouse",
+				metrics: { vector, raw }
+			});
+			mouseDynamics.resetMetrics();
 		}
 	};
 
 	const handleNext = async () => {
-		const currentQuestion = CALIBRATION_QUESTIONS[currentQuestionIndex];
-		let metrics;
-		if (currentQuestion.type === "essay") {
-			metrics = keystrokeDynamics.getCurrentMetrics();
-			keystrokeDynamics.resetMetrics();
-		} else {
-			metrics = mouseDynamics.getCurrentMetrics();
-			mouseDynamics.resetMetrics();
-		}
-		await saveBehavioralMetrics(currentQuestionIndex, metrics, currentQuestion.type);
-		if (currentQuestionIndex < CALIBRATION_QUESTIONS.length - 1) {
-			setCurrentQuestionIndex((prev) => prev + 1);
-		}
+		await saveBehavioralMetrics(currentQuestionIndex);
+		setCurrentQuestionIndex(i => Math.min(i + 1, CALIBRATION_QUESTIONS.length - 1));
 	};
 
 	const handlePrevious = () => {
@@ -187,71 +178,33 @@ const CalibrationPage = () => {
 
 	const handleSubmit = async () => {
 		if (!sessionId) return;
+		await saveBehavioralMetrics(currentQuestionIndex);
+		await supabase.from("calibration_sessions").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", sessionId);
+		// compute threshold
+		const { data: { session } } = await supabase.auth.getSession();
+		if (!session) return;
 		try {
-			// Save metrics for the current question
-			const currentQuestion = CALIBRATION_QUESTIONS[currentQuestionIndex];
-			let metrics;
-			if (currentQuestion.type === "essay") {
-				metrics = keystrokeDynamics.getCurrentMetrics();
-				keystrokeDynamics.resetMetrics();
-			} else {
-				metrics = mouseDynamics.getCurrentMetrics();
-				mouseDynamics.resetMetrics();
-			}
-			await saveBehavioralMetrics(currentQuestionIndex, metrics, currentQuestion.type);
-			// Update session status
-			await supabase
-				.from("calibration_sessions")
-				.update({ status: "completed", completed_at: new Date().toISOString() })
-				.eq("id", sessionId);
-			console.log("[CalibrationPage] Calibration complete for session:", sessionId);
-			// Compute personalized threshold from calibration data
-			const { data: { user } } = await supabase.auth.getUser();
-			if (user) {
-				try {
-					console.log("[CalibrationPage] Computing personalized threshold...");
-					const response = await fetch("http://127.0.0.1:5000/calibration/compute-threshold", {
-						method: "POST",
-						headers: { "Content-Type": "application/json" },
-						body: JSON.stringify({ student_id: user.id, calibration_session_id: sessionId })
-					});
-					if (response.ok) {
-						const result = await response.json();
-						console.log("[CalibrationPage] Personalized threshold computed:", result);
-						toast({
-							title: "Calibration completed!",
-							description: `Your personalized threshold (${result.threshold.toFixed(3)}) has been computed from ${result.samples_processed} samples.`,
-							className: "bg-success text-success-foreground",
-						});
-					} else {
-						console.error("[CalibrationPage] Failed to compute threshold:", await response.text());
-						toast({
-							title: "Calibration completed!",
-							description: "Your behavioral baseline has been recorded.",
-							className: "bg-success text-success-foreground",
-						});
-					}
-				} catch (thresholdError) {
-					console.error("[CalibrationPage] Error computing threshold:", thresholdError);
-					toast({
-						title: "Calibration completed!",
-						description: "Your behavioral baseline has been recorded.",
-						className: "bg-success text-success-foreground",
-					});
-				}
-			}
-			if (examId) {
-				navigate(`/exam/${examId}`);
-			} else {
-				navigate("/student-dashboard");
-			}
-		} catch (error) {
-			toast({
-				title: "Error",
-				description: "Failed to complete calibration",
-				className: "bg-error text-error-foreground",
+			const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
+			const resp = await fetch(`${backendUrl}/calibration/compute-threshold`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ student_id: session.user.id, calibration_session_id: sessionId })
 			});
+			if (!resp.ok) {
+				const txt = await resp.text();
+				console.error("[CalibrationPage] compute-threshold failed", resp.status, txt);
+			}
+			const result = await resp.json();
+			if (resp.ok) {
+				toast({ title: "Calibration complete", description: `Threshold ${result.threshold?.toFixed(3)}` });
+			} else {
+				toast({ title: "Calibration complete", description: "Baseline saved (backend returned error)" });
+			}
+		} catch (err) {
+			console.error("[CalibrationPage] threshold compute error", err);
+			toast({ title: "Calibration complete", description: "Baseline saved (compute failed)" });
 		}
+		if (examId) navigate(`/exam/${examId}`); else navigate("/student-dashboard");
 	};
 
 	if (loading) {

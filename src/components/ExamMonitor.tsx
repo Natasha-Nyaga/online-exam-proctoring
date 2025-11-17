@@ -12,15 +12,7 @@ const MOUSE_FEATURE_ORDER = [
   "trajectory_smoothness", "path_curvature", "transition_time"
 ];
 
-const KEYSTROKE_FEATURE_ORDER = [
-  "H.period", "DD.period.t", "UD.period.t", "H.t", "DD.t.i", "UD.t.i", "H.i",
-  "DD.i.e", "UD.i.e", "H.e", "DD.e.five", "UD.e.five", "H.five",
-  "DD.five.Shift.r", "UD.five.Shift.r", "H.Shift.r", "DD.Shift.r.o",
-  "UD.Shift.r.o", "H.o", "DD.o.a", "UD.o.a", "H.a", "DD.a.n", "UD.a.n",
-  "H.n", "DD.n.l", "UD.n.l", "H.l", "DD.l.Return", "UD.l.Return",
-  "H.Return", "typing_speed", "digraph_mean", "digraph_variance",
-  "trigraph_mean", "trigraph_variance", "error_rate"
-];
+import { extractMouseVector, extractKeystrokeVector } from "@/utils/featureExtractors";
 
 function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: string }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
@@ -70,31 +62,68 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
   // ===========================================================
   // STEP 2: Attach listeners for mouse and keyboard activity
   // ===========================================================
+  // ===========================================================
+  // STEP 2: Attach reliable global listeners for mouse & keyboard
+  // ===========================================================
   useEffect(() => {
-    console.log("[ExamMonitor] Mounting event listeners...");
+    console.log("[ExamMonitor] Mounting GLOBAL event listeners...");
 
     const handleMouseMove = (e: MouseEvent) => {
-      setMouseData(prev => [...prev.slice(-400), { x: e.clientX, y: e.clientY, t: Date.now() }]);
+      setMouseData(prev => {
+        const updated = [...prev, { x: e.clientX, y: e.clientY, t: Date.now() }];
+        return updated.slice(-800);   // keep last 800 points
+      });
     };
 
     const handleClick = () => {
-      setMouseData(prev => [...prev.slice(-400), { click: true, t: Date.now() }]);
+      setMouseData(prev => {
+        const updated = [...prev, { click: true, t: Date.now() }];
+        return updated.slice(-800);
+      });
+      if (!isEssay) {
+        // treat clicks as keystroke-like activity
+        const fakeKey = {
+          key: "CLICK",
+          type: "down",
+          t: Date.now()
+        };
+        setKeyData(prev => [...prev.slice(-400), fakeKey]);
+      }
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      setKeyData(prev => [...prev.slice(-200), { key: e.key, type: "down", t: Date.now() }]);
+      setKeyData(prev => {
+        const updated = [...prev, { key: e.key, type: "down", t: Date.now() }];
+        return updated.slice(-400);
+      });
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      setKeyData(prev => [...prev.slice(-200), { key: e.key, type: "up", t: Date.now() }]);
+      setKeyData(prev => {
+        const updated = [...prev, { key: e.key, type: "up", t: Date.now() }];
+        return updated.slice(-400);
+      });
     };
+
+    // Attach to BOTH window + document to prevent event shadowing
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("click", handleClick);
+    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keyup", handleKeyUp);
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("click", handleClick);
     window.addEventListener("keydown", handleKeyDown);
     window.addEventListener("keyup", handleKeyUp);
 
+    console.log("[ExamMonitor] Event listeners READY.");
+
     return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("click", handleClick);
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keyup", handleKeyUp);
+
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("click", handleClick);
       window.removeEventListener("keydown", handleKeyDown);
@@ -102,78 +131,41 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
     };
   }, []);
 
-  // ===========================================================
-  // STEP 3: Extract features
-  // ===========================================================
-  const extractMouseFeatures = () => {
-    if (mouseData.length < 2) return null;
-    let path_length = 0, total_time = 0, clicks = 0;
-    for (let i = 1; i < mouseData.length; i++) {
-      const prev = mouseData[i - 1], curr = mouseData[i];
-      if (!prev.x || !curr.x) continue;
-      const dx = curr.x - prev.x, dy = curr.y - prev.y;
-      const dt = (curr.t - prev.t) / 1000;
-      if (dt > 0) {
-        path_length += Math.hypot(dx, dy);
-        total_time += dt;
-      }
-      if (curr.click) clicks++;
-    }
-    const avg_speed = total_time > 0 ? path_length / total_time : 0;
-    const click_frequency = total_time > 0 ? clicks / total_time : 0;
-    return {
-      path_length, avg_speed, idle_time: 0, dwell_time: 0, hover_time: 0,
-      click_frequency, click_interval_mean: 0, click_ratio_per_question: 0,
-      trajectory_smoothness: 0, path_curvature: 0, transition_time: 0,
-    };
+  // --- Robust prediction logic ---
+  const MIN_MOUSE_POINTS = 8;
+  const MIN_KEY_EVENTS = 6;
+
+  const buildMouseFeaturesOrdered = (mData: any[]) => {
+    if (!mData || mData.length < 2) return null;
+    const feat = extractMouseVector(mData); // must match backend order
+    if (!feat) return null;
+    return feat;
   };
 
-  const extractKeystrokeFeatures = () => {
-    if (keyData.length < 2) return null;
-    const downs = keyData.filter(d => d.type === "down");
-    const ups = keyData.filter(d => d.type === "up");
-    const dwell_times: number[] = [];
-    downs.forEach(d => {
-      const u = ups.find(u => u.key === d.key && u.t > d.t);
-      if (u) dwell_times.push(u.t - d.t);
-    });
-    const typing_duration =
-      downs.length > 1 ? (downs[downs.length - 1].t - downs[0].t) / 1000 : 1;
-    const typing_speed = downs.length / typing_duration;
-    const features: Record<string, number> = {};
-    KEYSTROKE_FEATURE_ORDER.forEach(k => (features[k] = 0));
-    features["typing_speed"] = typing_speed;
-    return features;
+  const buildKeyFeaturesOrdered = (kData: any[]) => {
+    if (!kData || kData.length < 2) return null;
+    const feat = extractKeystrokeVector(kData); // must match backend order
+    if (!feat) return null;
+    return feat;
   };
 
-  // ===========================================================
-  // STEP 4: Send predictions to backend
-  // ===========================================================
   const sendPredict = async () => {
     console.log("[ExamMonitor] Data buffer sizes:", mouseData.length, keyData.length);
-    if (mouseData.length < 10 && keyData.length < 10) {
-      console.warn("[ExamMonitor] Not enough data yet, skipping prediction cycle.");
-      return;
-    }
-
-    const mouse_features = extractMouseFeatures();
-    const keystroke_features = extractKeystrokeFeatures();
-
+    const mouseEnough = mouseData.length >= MIN_MOUSE_POINTS;
+    const keyEnough = keyData.length >= MIN_KEY_EVENTS;
+    const mouse_features = !isEssay && mouseEnough ? buildMouseFeaturesOrdered(mouseData) : null;
+    const keystroke_features = isEssay && keyEnough ? buildKeyFeaturesOrdered(keyData) : null;
     if (!mouse_features && !keystroke_features) {
-      console.warn("[ExamMonitor] No usable features; skipping this round.");
+      console.log("[ExamMonitor] Not enough data yet, skipping prediction.");
       return;
     }
-
     const payload = {
       studentId,
       sessionId,
       questionType,
-      mouse_features: isEssay ? null : mouse_features,
-      keystroke_features: isEssay ? keystroke_features : null,
+      mouse_features_obj_sample: mouse_features,
+      keystroke_features_obj_sample: keystroke_features,
     };
-
-    console.log(`[ExamMonitor] Sending ${questionType} features for prediction...`);
-
     try {
       const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
       const res = await fetch(`${backendUrl}/predict`, {
@@ -183,37 +175,30 @@ function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: s
       });
       const result = await res.json();
       console.log("[ExamMonitor] /predict response:", result);
-
       setFusionScore(result.fusion_score ?? 0);
-      const usedThreshold = isEssay ? thresholds.keystroke : thresholds.mouse;
-
-      if (result.fusion_score > usedThreshold) {
-        setStatus("⚠️ Suspicious Activity");
-        toast.warning(`Suspicious behavior detected (score ${result.fusion_score.toFixed(3)} > ${usedThreshold})`);
+      if (result.cheating_prediction === 1) {
+        setStatus("🚨 Cheating detected");
+        toast.error(`Cheating detected! score=${result.fusion_score?.toFixed(3)} > ${result.threshold?.toFixed(3)}`);
+      } else if (result.fusion_score > result.threshold) {
+        setStatus("⚠️ Suspicious");
+        toast.warning(`Suspicious behaviour (score ${result.fusion_score?.toFixed(3)} > ${result.threshold?.toFixed(3)})`);
       } else {
         setStatus("✅ Normal");
       }
-
-      // Reset old data
+      // trim buffers to last few seconds
       const cutoff = Date.now() - 4000;
       setMouseData(prev => prev.filter(d => d.t > cutoff));
       setKeyData(prev => prev.filter(d => d.t > cutoff));
-
     } catch (err) {
-      console.error("[ExamMonitor] Prediction error:", err);
-      toast.error("Prediction failed");
+      console.error("[ExamMonitor] Prediction failed", err);
     }
   };
 
-  // ===========================================================
-  // STEP 5: Run periodic predictions
-  // ===========================================================
   useEffect(() => {
-    if (studentId && sessionId) {
-      const interval = setInterval(sendPredict, 8000);
-      return () => clearInterval(interval);
-    }
-  }, [studentId, sessionId, thresholds]);
+    if (!studentId || !sessionId) return;
+    const interval = setInterval(sendPredict, 8000);
+    return () => clearInterval(interval);
+  }, [studentId, sessionId, mouseData, keyData, questionType]);
 
   // ===========================================================
   // UI

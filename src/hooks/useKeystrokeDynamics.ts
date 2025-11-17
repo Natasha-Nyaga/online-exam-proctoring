@@ -123,5 +123,6 @@ export const useKeystrokeDynamics = () => {
     handleKeyUp,
     getCurrentMetrics,
     resetMetrics,
+    keystrokeEvents, // Expose ref for raw event access
   };
 };

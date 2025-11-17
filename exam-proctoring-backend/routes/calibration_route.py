@@ -40,81 +40,106 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 @calibration_bp.route("/calibration/compute-threshold", methods=["POST"])
 def compute_threshold():
+    import traceback
+    from datetime import datetime
     try:
-        data = request.get_json()
-        session_id = data.get('session_id') or data.get('calibration_session_id')
-        student_id = data.get('student_id')
+        payload = request.get_json(force=True)
+        session_id = payload.get("session_id") or payload.get("calibration_session_id")
+        student_id = payload.get("student_id")
 
         if not session_id or not student_id:
-            return jsonify({'error': 'Missing session_id or student_id'}), 400
+            return jsonify({"error": "Missing session_id or student_id"}), 400
 
-        response = supabase.table("behavioral_metrics").select("*").eq("calibration_session_id", session_id).execute()
-        metrics = response.data
-
+        result = supabase.table("behavioral_metrics") \
+            .select("*") \
+            .eq("calibration_session_id", session_id) \
+            .eq("student_id", student_id) \
+            .execute()
+        metrics = getattr(result, "data", None)
         if not metrics or len(metrics) == 0:
             print(f"[Calibration] ERROR: No behavioral metrics found for session {session_id}")
             return jsonify({"error": "No behavioral metrics found"}), 400
 
-        print(f"[Calibration] Found {len(metrics)} calibration metrics for {student_id}")
-
-        mouse_scores = []
-        keystroke_scores = []
+        print(f"[Calibration] Found {len(metrics)} metrics for session {session_id}")
 
         def extract_numeric_values(obj):
-            """Flatten nested dict/list structure into simple numeric values."""
-            numeric_values = []
+            numeric = []
+            if obj is None:
+                return numeric
             if isinstance(obj, dict):
                 for v in obj.values():
                     if isinstance(v, (int, float)):
-                        numeric_values.append(v)
+                        numeric.append(float(v))
                     elif isinstance(v, list):
-                        numeric_values += [x for x in v if isinstance(x, (int, float))]
+                        for e in v:
+                            if isinstance(e, (int, float)):
+                                numeric.append(float(e))
+                            elif isinstance(e, dict):
+                                numeric += extract_numeric_values(e)
                     elif isinstance(v, dict):
-                        numeric_values += extract_numeric_values(v)
+                        numeric += extract_numeric_values(v)
             elif isinstance(obj, list):
-                numeric_values += [x for x in obj if isinstance(x, (int, float))]
-            return numeric_values
+                for e in obj:
+                    if isinstance(e, (int, float)):
+                        numeric.append(float(e))
+                    elif isinstance(e, dict):
+                        numeric += extract_numeric_values(e)
+            return numeric
 
+        mouse_scores = []
+        keystroke_scores = []
         for m in metrics:
             metric_type = m.get("metric_type")
-            features = m.get("metrics", {})
-            numeric_values = extract_numeric_values(features)
-            if not numeric_values:
+            metrics_obj = m.get("metrics") or m.get("metric") or m.get("data") or {}
+            numeric = extract_numeric_values(metrics_obj)
+            if not numeric:
                 continue
-            avg_score = float(np.mean(numeric_values))
+            avg = float(np.mean(numeric))
             if metric_type == "mouse":
-                mouse_scores.append(avg_score)
+                mouse_scores.append(avg)
             elif metric_type == "keystroke":
-                keystroke_scores.append(avg_score)
+                keystroke_scores.append(avg)
 
-        if not mouse_scores and not keystroke_scores:
+        if len(mouse_scores) == 0 and len(keystroke_scores) == 0:
+            print("[Calibration] ERROR: Could not compute any valid predictions from calibration metrics")
             return jsonify({"error": "Could not compute any valid predictions"}), 400
 
-        mouse_threshold = float(np.mean(mouse_scores)) if mouse_scores else 0.85
-        keystroke_threshold = float(np.mean(keystroke_scores)) if keystroke_scores else 0.85
-        fusion_mean = (mouse_threshold + keystroke_threshold) / 2
-        fusion_std = float(np.std([mouse_threshold, keystroke_threshold]))
-        threshold = fusion_mean
-        from datetime import datetime
-        supabase.table("personal_thresholds").upsert({
+        mouse_threshold = float(np.mean(mouse_scores) + 1.25 * np.std(mouse_scores)) if len(mouse_scores) > 0 else None
+        keystroke_threshold = float(np.mean(keystroke_scores) + 1.25 * np.std(keystroke_scores)) if len(keystroke_scores) > 0 else None
+        used_values = []
+        if mouse_threshold is not None:
+            used_values.append(mouse_threshold)
+        if keystroke_threshold is not None:
+            used_values.append(keystroke_threshold)
+        fusion_mean = float(np.mean(used_values)) if used_values else None
+        fusion_std = float(np.std(used_values)) if used_values else None
+        final_threshold = fusion_mean if fusion_mean is not None else 0.55
+
+        store_payload = {
             "student_id": student_id,
             "calibration_session_id": session_id,
-            "mouse_threshold": mouse_threshold,
-            "keystroke_threshold": keystroke_threshold,
             "fusion_mean": fusion_mean,
             "fusion_std": fusion_std,
-            "threshold": threshold,
-            "created_at": datetime.utcnow().isoformat(),
-        }).execute()
-        print(f"[Calibration] ✅ Thresholds saved for {student_id}: mouse={mouse_threshold:.3f}, keystroke={keystroke_threshold:.3f}, fusion_mean={fusion_mean:.3f}, fusion_std={fusion_std:.3f}, threshold={threshold:.3f}")
-        return jsonify({
-            "mouse_threshold": mouse_threshold,
-            "keystroke_threshold": keystroke_threshold,
-            "fusion_mean": fusion_mean,
-            "fusion_std": fusion_std,
-            "threshold": threshold
-        })
+            "threshold": final_threshold,
+            "created_at": datetime.utcnow().isoformat()
+        }
+        if mouse_threshold is not None:
+            store_payload["mouse_threshold"] = mouse_threshold
+        if keystroke_threshold is not None:
+            store_payload["keystroke_threshold"] = keystroke_threshold
 
+        supabase.table("personal_thresholds").insert(store_payload).execute()
+        print("[Calibration] ✅ Thresholds saved:", store_payload)
+        response = {
+            "samples_processed": len(mouse_scores) + len(keystroke_scores),
+            "mouse_threshold": mouse_threshold,
+            "keystroke_threshold": keystroke_threshold,
+            "fusion_mean": fusion_mean,
+            "fusion_std": fusion_std,
+            "threshold": final_threshold
+        }
+        return jsonify(response), 200
     except Exception as e:
-        print("[Calibration] Exception:", str(e))
+        print("[Calibration] FATAL ERROR:", str(e))
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
