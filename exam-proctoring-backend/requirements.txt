@@ -4,5 +4,6 @@ joblib
 numpy
 scikit-learn
 lightgbm
+catboost
 supabase
 python-dotenv

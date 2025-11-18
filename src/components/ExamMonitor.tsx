@@ -12,7 +12,9 @@ const MOUSE_FEATURE_ORDER = [
   "trajectory_smoothness", "path_curvature", "transition_time"
 ];
 
-import { extractMouseVector, extractKeystrokeVector } from "@/utils/featureExtractors";
+// Update this import to match the actual exports from featureExtractors
+import { extractMouseVector } from "@/utils/featureExtractors";
+import { extractKeystrokeVector } from "@/utils/featureExtractors";
 
 function ExamMonitor({ studentId, sessionId }: { studentId: string; sessionId: string }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
