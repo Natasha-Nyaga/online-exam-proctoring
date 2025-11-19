@@ -191,64 +191,58 @@ const CalibrationPage = () => {
         if (!sessionId) return;
         const q = CALIBRATION_QUESTIONS[questionIndex];
         const { data: { session } } = await supabase.auth.getSession();
-        const userId = session.user.id;
+        const userId = session?.user?.id;
 
         if (q.type === "essay") {
             // --- Keystroke Dynamics Collection ---
             const raw = keystrokeDynamics.keystrokeEvents.current || [];
-
-            // Map the raw events to the required format for the extractor
             const formattedRaw = raw.map(e => ({
                 key: e.key,
-                type: e.type, // 'down' or 'up'
+                type: e.type,
                 timestamp: e.timestamp
             }));
-
-            // Extract the numerical feature vector (e.g., DH, DD, UD times)
             const vector = extractKeystrokeVector(formattedRaw);
-            // Sanitize vector: ensure values are numbers and finite (replace errors/NaNs with 0)
             const safeVector = vector.map(v => typeof v === 'number' && isFinite(v) ? v : 0);
 
-            // Insert metrics into Supabase
             await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: sessionId,
-                student_id: userId,
-				metric_type: "keystroke",
-				question_type: "essay",
+                calibration_session_id: String(sessionId), // Ensure string type
+                student_id: userId, // Must be authenticated user's UUID
+                metric_type: "keystroke",
+                question_type: "essay",
                 question_index: questionIndex,
-                metrics: { vector: safeVector, raw: formattedRaw } // Store both vector and raw data
+                dwell_times: safeVector[0],
+                flight_times: safeVector[1],
+                typing_speed: safeVector[2],
+                error_rate: safeVector[3],
+                key_sequence: formattedRaw,
             });
-
-            keystrokeDynamics.resetMetrics(); // Reset for the next essay question
-
+            keystrokeDynamics.resetMetrics();
         } else {
             // --- Mouse Dynamics Collection (for MCQ) ---
             const mouseMetrics = mouseDynamics.getCurrentMetrics();
-
-            // Map raw mouse positions and clicks to the required format
             const formattedMouse = mouseMetrics.cursorPositions.map(p => ({
                 x: p.x,
                 y: p.y,
                 t: p.t,
-                click: !!p.click // Boolean indicator for a click event
+                click: !!p.click
             }));
-
-            // Extract the numerical feature vector (e.g., speed, acceleration, click count)
             const vector = extractMouseVector(formattedMouse);
-            // Sanitize vector
             const safeVector = vector.map(v => typeof v === 'number' && isFinite(v) ? v : 0);
 
-            // Insert metrics into Supabase
             await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: sessionId,
-                student_id: userId,
-				metric_type: "mouse",
-				question_type: "mcq",
+                calibration_session_id: String(sessionId), // Ensure string type
+                student_id: userId, // Must be authenticated user's UUID
+                metric_type: "mouse",
+                question_type: "mcq",
                 question_index: questionIndex,
-                metrics: { vector: safeVector, raw: formattedMouse } // Store both vector and raw data
+                cursor_positions: formattedMouse,
+                movement_speed: safeVector[0],
+                acceleration: safeVector[1],
+                click_frequency: safeVector[2],
+                trajectory_smoothness: safeVector[3],
+                click_positions: formattedMouse.filter(p => p.click),
             });
-
-            mouseDynamics.resetMetrics(); // Reset for the next MCQ question
+            mouseDynamics.resetMetrics();
         }
     };
 

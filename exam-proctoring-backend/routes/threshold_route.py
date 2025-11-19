@@ -4,15 +4,12 @@ import os
 import numpy as np
 import pandas as pd  # <--- NEW IMPORT
 from flask import Blueprint, request, jsonify
-from supabase import create_client, Client
 from feature_definitions import KEYSTROKE_FEATURE_NAMES  # <--- IMPORT THE LIST
 
 threshold_bp = Blueprint("threshold_bp", __name__)
 
-# --- SUPABASE CONFIG ---
-url: str = os.environ.get("VITE_SUPABASE_URL")
-key: str = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-supabase: Client = create_client(url, key)
+
+# --- SUPABASE CLIENT IS NOW ACCESSED VIA APP ---
 
 def pad_vector(vector, target_length):
     """Ensures vector is exactly target_length."""
@@ -24,8 +21,7 @@ def pad_vector(vector, target_length):
 
 @threshold_bp.route("/compute-threshold", methods=["POST"])
 def compute_threshold():
-    from app import ML_ASSETS 
-    
+    from app import ML_ASSETS, supabase as global_supabase
     try:
         data = request.get_json()
         session_id = data.get("session_id")
@@ -34,61 +30,41 @@ def compute_threshold():
         if not session_id or not student_id:
             return jsonify({"error": "Missing session_id or student_id"}), 400
 
-        # 1. Fetch Calibration Data
         print(f"[Backend] Fetching calibration: {session_id}")
-        response = supabase.table("behavioral_metrics").select("*").eq("session_id", session_id).execute()
+        if not global_supabase:
+            return jsonify({"error": "Backend configuration error: Supabase not initialized"}), 500
+        response = global_supabase.table("behavioral_metrics").select("*").eq("calibration_session_id", session_id).execute()
         records = response.data
-        
-        if not records:
-             return jsonify({"error": "No calibration data found"}), 404
 
-        # 2. Extract & Aggregate Vectors
-        # Get the expected feature count from the scaler (usually reliable)
-        # or default to your known counts: 245 for keys, 11 for mouse
-        k_vectors = [pad_vector(r.get("keystroke_vector"), 245) for r in records if r.get("keystroke_vector")]
+        if not records:
+            return jsonify({"error": "No calibration data found"}), 404
+
+        feature_len = len(KEYSTROKE_FEATURE_NAMES)
+        k_vectors = [pad_vector(r.get("keystroke_vector"), feature_len) for r in records if r.get("keystroke_vector")]
         m_vectors = [pad_vector(r.get("mouse_vector"), 11) for r in records if r.get("mouse_vector")]
 
-        # Average the vectors (Mean aggregation)
-        avg_k_vector = np.mean(k_vectors, axis=0) if k_vectors else np.zeros(245)
+        avg_k_vector = np.mean(k_vectors, axis=0) if k_vectors else np.zeros(feature_len)
         avg_m_vector = np.mean(m_vectors, axis=0) if m_vectors else np.zeros(11)
 
-        # 3. PREPARE DATA FOR CATBOOST (CRITICAL FIX)
-        # We must use a DataFrame with the exact feature names from the model
         k_model = ML_ASSETS['keystroke_model']
-        
-        # Scale first (Scalers usually return arrays, which is fine)
-        k_scaled_array = ML_ASSETS['scaler_keystroke'].transform(avg_k_vector.reshape(1, -1))
-        
-        # WRAP IN DATAFRAME: Check if model has feature_names_
-        if hasattr(k_model, 'feature_names_'):
-            k_input = pd.DataFrame(k_scaled_array, columns=k_model.feature_names_)
-        else:
-            # Fallback if names aren't stored, but CatBoost usually stores them
-            k_input = k_scaled_array
-
-        # Do the same for Mouse (Mouse is likely Scikit-Learn, simpler, but safety first)
-        m_scaled = ML_ASSETS['scaler_mouse'].transform(avg_m_vector.reshape(1, -1))
-
-        # 4. Predict
+        k_scaled_array = ML_ASSETS['keystroke_scaler'].transform(avg_k_vector.reshape(1, -1))
         k_input_df = pd.DataFrame(k_scaled_array, columns=KEYSTROKE_FEATURE_NAMES)
         prob_keystroke = float(k_model.predict_proba(k_input_df)[0][1])
+        m_scaled = ML_ASSETS['mouse_scaler'].transform(avg_m_vector.reshape(1, -1))
         prob_mouse = float(ML_ASSETS['mouse_model'].predict_proba(m_scaled)[0][1])
 
-        # 5. Fusion & Threshold
         baseline_score = (0.6 * prob_mouse) + (0.4 * prob_keystroke)
-        # Threshold logic: 15% buffer below baseline, floor at 0.5
         calculated_threshold = max(0.50, baseline_score - 0.15)
 
         print(f"[Backend] Baseline: {baseline_score:.4f} -> Threshold: {calculated_threshold:.4f}")
 
-        # 6. Save
         upsert_data = {
             "student_id": student_id,
             "fusion_threshold": round(calculated_threshold, 4),
             "mouse_threshold": round(prob_mouse, 4),
             "keystroke_threshold": round(prob_keystroke, 4)
         }
-        supabase.table("personal_thresholds").upsert(upsert_data).execute()
+        global_supabase.table("personal_thresholds").upsert(upsert_data, on_conflict="student_id").execute()
 
         return jsonify({
             "message": "Threshold generated",

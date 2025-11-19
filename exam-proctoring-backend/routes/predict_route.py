@@ -6,8 +6,8 @@ from datetime import datetime
 
 predict_bp = Blueprint("predict_bp", __name__)
 
-SUPABASE_URL = os.getenv("VITE_SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # load once
@@ -16,7 +16,7 @@ keystroke_model = joblib.load("models/keystroke_model.joblib")
 mouse_scaler = joblib.load("models/scaler_mouse.joblib")
 keystroke_scaler = joblib.load("models/scaler_keystroke.joblib")
 
-DEFAULT_THRESHOLD = 0.55
+DEFAULT_THRESHOLD = 0.70
 MOUSE_WEIGHT = 0.45
 KEY_WEIGHT = 0.55
 
