@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
-import ExamMonitor from "../components/ExamMonitor";
+import { AlertCircle, Clock } from "lucide-react";
 
 interface Question {
   id: string;
@@ -210,8 +210,7 @@ const ExamPage = () => {
         <span className="font-medium">Monitoring in Progress</span>
       </div>
 
-      {/* Only show live monitoring, not calibration status or controls */}
-      <ExamMonitor studentId={studentId} sessionId={sessionId || ""} />
+      {/* Monitoring component removed: ExamMonitor was deleted */}
 
       {/* Header */}
       <header className="border-b bg-secondary shadow-sm">

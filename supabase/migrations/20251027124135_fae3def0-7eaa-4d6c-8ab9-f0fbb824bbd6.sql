@@ -8,31 +8,42 @@ CREATE TABLE public.calibration_sessions (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create behavioral_metrics table to store keystroke and mouse dynamics
+-- Create behavioral_metrics table WITH OLD FIELDS REMOVED AND NEW FIELDS ONLY
 CREATE TABLE public.behavioral_metrics (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
   calibration_session_id UUID NOT NULL REFERENCES public.calibration_sessions(id) ON DELETE CASCADE,
   student_id UUID NOT NULL,
-  metric_type TEXT NOT NULL, -- 'keystroke' or 'mouse'
-  question_type TEXT NOT NULL, -- 'essay' or 'mcq'
+  metric_type TEXT NOT NULL,       -- 'keystroke' or 'mouse'
+  question_type TEXT NOT NULL,     -- 'essay' or 'mcq'
   question_index INTEGER NOT NULL,
-  
-  -- Keystroke dynamics (for essay questions)
-  dwell_times JSONB, -- array of key hold durations
-  flight_times JSONB, -- array of time between key presses
-  typing_speed NUMERIC, -- characters per minute
-  error_rate NUMERIC, -- backspace/delete ratio
-  key_sequence JSONB, -- sequence of keys pressed
-  
-  -- Mouse dynamics (for MCQ questions)
-  cursor_positions JSONB, -- array of {x, y, timestamp}
-  movement_speed NUMERIC, -- pixels per second average
-  acceleration NUMERIC, -- average acceleration
-  click_frequency NUMERIC, -- clicks per second
-  hover_times JSONB, -- array of hover durations on each option
-  trajectory_smoothness NUMERIC, -- curvature metric
-  click_positions JSONB, -- array of click coordinates
-  
+
+  ---------------------------------------------------------------------------
+  -- 🔹 NEW KEYSTROKE FEATURES (ONLY)
+  ---------------------------------------------------------------------------
+
+  mean_du_key1_key1 NUMERIC,
+  mean_dd_key1_key2 NUMERIC,
+  mean_du_key1_key2 NUMERIC,
+  mean_ud_key1_key2 NUMERIC,
+  mean_uu_key1_key2 NUMERIC,
+
+  std_du_key1_key1 NUMERIC,
+  std_dd_key1_key2 NUMERIC,
+  std_du_key1_key2 NUMERIC,
+  std_ud_key1_key2 NUMERIC,
+  std_uu_key1_key2 NUMERIC,
+
+  keystroke_count INTEGER,
+
+  ---------------------------------------------------------------------------
+  -- 🔹 NEW MOUSE FEATURES (ONLY)
+  ---------------------------------------------------------------------------
+
+  inactive_duration NUMERIC,
+  copy_cut INTEGER,
+  paste INTEGER,
+  double_click INTEGER,
+
   recorded_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -71,7 +82,7 @@ CREATE POLICY "Admins can view all behavioral metrics"
   ON public.behavioral_metrics FOR SELECT
   USING (has_role(auth.uid(), 'admin'::app_role));
 
--- Create index for better query performance
+-- Indexes for performance
 CREATE INDEX idx_behavioral_metrics_session ON public.behavioral_metrics(calibration_session_id);
 CREATE INDEX idx_behavioral_metrics_student ON public.behavioral_metrics(student_id);
 CREATE INDEX idx_calibration_sessions_student ON public.calibration_sessions(student_id);

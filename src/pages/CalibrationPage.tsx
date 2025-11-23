@@ -16,9 +16,8 @@ import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
 // Custom hooks for capturing behavioral biometrics
 import { useKeystrokeDynamics } from "@/hooks/useKeystrokeDynamics";
-import { extractKeystrokeVector } from "@/utils/featureExtractors";
 import { useMouseDynamics } from "@/hooks/useMouseDynamics";
-import { extractMouseVector } from "@/utils/featureExtractors";
+
 
 // --- Configuration and Data Definitions ---
 
@@ -118,18 +117,20 @@ const CalibrationPage = () => {
 
             // 2. Safely check for existing exam session (optional logic, mostly ignored here)
             // This section checks if a main exam session is in progress, but the code proceeds regardless.
+            // Use REST API fetch for exam_sessions since Supabase client is not typed for this table
             let existingSession = [];
             try {
-                const { data, error, status } = await supabase
-                    .from("exam_sessions")
-                    .select("*")
-                    .eq("exam_id", examId)
-                    .eq("student_id", session.user.id)
-                    .eq("status", "in_progress");
-                if (error && status !== 406) throw error;
-                existingSession = data || [];
+                const studentId = session.user.id;
+                const res = await fetch(`${SUPABASE_URL}/rest/v1/exam_sessions?exam_id=eq.${examId}&student_id=eq.${studentId}&status=eq.in_progress&select=*`, {
+                    headers: {
+                        apikey: SUPABASE_ANON_KEY,
+                        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+                    },
+                });
+                if (!res.ok) throw new Error(`Exam session fetch failed: ${res.status}`);
+                existingSession = await res.json();
             } catch (err) {
-                console.warn("[CalibrationPage] Ignoring Supabase fetch error:", err);
+                console.warn("[CalibrationPage] Ignoring exam_sessions fetch error:", err);
             }
 
             // 3. Create a new calibration session record in the database
@@ -201,20 +202,19 @@ const CalibrationPage = () => {
                 type: e.type,
                 timestamp: e.timestamp
             }));
-            const vector = extractKeystrokeVector(formattedRaw);
-            const safeVector = vector.map(v => typeof v === 'number' && isFinite(v) ? v : 0);
+            // No feature extraction, just store empty vector
+            const safeVector: number[] = [];
 
             await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: String(sessionId), // Ensure string type
-                student_id: userId, // Must be authenticated user's UUID
+                calibration_session_id: String(sessionId),
+                student_id: userId,
                 metric_type: "keystroke",
                 question_type: "essay",
                 question_index: questionIndex,
-                dwell_times: safeVector[0],
-                flight_times: safeVector[1],
-                typing_speed: safeVector[2],
-                error_rate: safeVector[3],
-                key_sequence: formattedRaw,
+                metrics: {
+                    keystroke_vector: safeVector,
+                    key_sequence: formattedRaw
+                }
             });
             keystrokeDynamics.resetMetrics();
         } else {
@@ -226,21 +226,20 @@ const CalibrationPage = () => {
                 t: p.t,
                 click: !!p.click
             }));
-            const vector = extractMouseVector(formattedMouse);
-            const safeVector = vector.map(v => typeof v === 'number' && isFinite(v) ? v : 0);
+            // No feature extraction, just store empty vector
+            const safeVector: number[] = [];
 
             await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: String(sessionId), // Ensure string type
-                student_id: userId, // Must be authenticated user's UUID
+                calibration_session_id: String(sessionId),
+                student_id: userId,
                 metric_type: "mouse",
                 question_type: "mcq",
                 question_index: questionIndex,
-                cursor_positions: formattedMouse,
-                movement_speed: safeVector[0],
-                acceleration: safeVector[1],
-                click_frequency: safeVector[2],
-                trajectory_smoothness: safeVector[3],
-                click_positions: formattedMouse.filter(p => p.click),
+                metrics: {
+                    mouse_vector: safeVector,
+                    cursor_positions: formattedMouse,
+                    click_positions: formattedMouse.filter(p => p.click)
+                }
             });
             mouseDynamics.resetMetrics();
         }
@@ -267,10 +266,8 @@ const CalibrationPage = () => {
      */
     const handleSubmit = async () => {
         if (!sessionId) return;
-
         // 1. Save metrics for the final question
         await saveBehavioralMetrics(currentQuestionIndex);
-
         // 2. Mark calibration session as completed
         await supabase
             .from("calibration_sessions")
@@ -279,61 +276,12 @@ const CalibrationPage = () => {
                 completed_at: new Date().toISOString()
             })
             .eq("id", sessionId);
-
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session) return;
-
-        // 3. Trigger backend ML computation to establish the baseline threshold
-        try {
-            const backendUrl = import.meta.env.VITE_BACKEND_URL || "http://127.0.0.1:5000";
-            const studentId = session.user.id;
-            const payload = {
-                student_id: studentId,
-                session_id: sessionId // <-- ensure this is present and matches backend expectation
-            };
-            console.log("Sending payload:", payload); // Debug log
-            const resp = await fetch(`${backendUrl}/calibration/compute-threshold`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
-            const text = await resp.text();
-            console.log("[CalibrationPage] compute-threshold RAW:", text);
-
-            let result = null;
-            try {
-                result = JSON.parse(text); // Attempt to parse the JSON response
-            } catch (err) {
-                console.warn("[CalibrationPage] JSON parse failed for backend response");
-            }
-
-            // 4. Handle response and show toast
-            if (!resp.ok) {
-                console.error("[CalibrationPage] compute-threshold failed", resp.status, text);
-                toast({
-                    title: "Calibration complete",
-                    description: "Baseline saved but thresholding failed.",
-                    className: "bg-error text-error-foreground",
-                });
-            } else {
-                toast({
-                    title: "Calibration complete",
-                    // Display the computed threshold if available
-                    description: `Threshold = ${result.threshold?.toFixed(3)}`,
-                    className: "bg-success text-success-foreground"
-                });
-            }
-
-        } catch (err) {
-            console.error("[CalibrationPage] threshold compute error", err);
-            toast({
-                title: "Calibration complete",
-                description: "Baseline saved (compute failed)",
-                className: "bg-error text-error-foreground",
-            });
-        }
-
-        // 5. Navigate to the next step (exam or dashboard)
+        // 3. Show completion toast and navigate
+        toast({
+            title: "Calibration complete",
+            description: "Your behavioral calibration data has been saved.",
+            className: "bg-success text-success-foreground"
+        });
         if (examId) navigate(`/exam/${examId}`);
         else navigate("/student-dashboard");
     };
