@@ -223,16 +223,11 @@ const ExamPage = () => {
 
   // --- Event Listeners ---
   useEffect(() => {
-    const getTabStatus = () => (!document.hidden ? 'active' : 'inactive');
-    
     // Mouse event handler (captures move, copy, cut, paste, dblclick)
     const handleMouseEvent = (type: string, e: MouseEvent | Event) => {
-      // Use MouseEvent to ensure clientX/Y exist, default to 0 for other events
-      const mouseEvent = e as MouseEvent; 
-
+      const mouseEvent = e as MouseEvent;
       mouseBuffer.current.push({
-        event_type: type,
-        tab: getTabStatus(),
+        type,
         timestamp: Date.now(),
         x: mouseEvent.clientX || 0,
         y: mouseEvent.clientY || 0
@@ -241,11 +236,13 @@ const ExamPage = () => {
 
     // Keystroke handler (captures key presses)
     const handleKeyDown = (e: KeyboardEvent) => {
+      const now = Date.now();
       keyBuffer.current.push({
-        event_type: 'keypress',
         key: e.key,
-        timestamp: Date.now(),
-        tab: getTabStatus(),
+        down_time: now,
+        up_time: now,
+        timestamp: now,
+        type: 'keydown'
       });
     };
     
@@ -285,15 +282,15 @@ const ExamPage = () => {
       const currentTime = Date.now();
       
       const payload = {
-        student_id: studentId,
-        exam_id: examId,
-        session_id: sessionId,
-        start_timestamp: lastSubmissionTime.current, // Start of the current window
-        end_timestamp: currentTime,
+        student_id: String(studentId),
+        exam_id: String(examId),
+        exam_session_id: String(sessionId),
+        start_timestamp: Number(lastSubmissionTime.current),
+        end_timestamp: Number(currentTime),
         mouse_events: [...mouseBuffer.current],
-        key_events: [...keyBuffer.current],
+        keystroke_events: [...keyBuffer.current],
         // NOTE: Video score would be added here if you implemented video analytics
-        // video_score: [latest_video_analysis_score] 
+        // video_score: [latest_video_analysis_score]
       };
 
       // Clear buffers and update last submission time immediately
@@ -311,7 +308,7 @@ const ExamPage = () => {
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-
+        /*...*/
         const data = await response.json();
         console.log("AI Analysis:", data);
 

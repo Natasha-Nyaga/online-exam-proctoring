@@ -28,22 +28,46 @@ def analyze_behavior():
     Processes real-time keystroke and mouse data, applies personalized normalization, 
     predicts anomaly scores, and logs incidents if the personalized threshold is exceeded.
     """
+
     data = request.get_json()
-    
-    student_id = data.get('student_id') # UUID of the student profile
-    exam_session_id = data.get('exam_session_id') # UUID of the exam_sessions table entry
+    print("[DEBUG] Incoming /analyze_behavior request data:", data)
+
+    # Accept both 'exam_session_id' and 'calibration_session_id' for consistency
+    student_id = data.get('student_id')
+    exam_session_id = data.get('exam_session_id') or data.get('calibration_session_id')
     mouse_events = data.get('mouse_events', [])
     key_events = data.get('key_events', [])
-    
+
+    print(f"[ID CONSISTENCY] Received student_id: {student_id}")
+    print(f"[ID CONSISTENCY] Received session_id: {exam_session_id}")
+    print(f"[ID CONSISTENCY] mouse_events count: {len(mouse_events)}, key_events count: {len(key_events)}")
+
+    # Also log to the response for frontend debugging (optional, remove in production)
+    consistency_log = {
+        "student_id": student_id,
+        "session_id": exam_session_id,
+        "mouse_events_count": len(mouse_events),
+        "key_events_count": len(key_events)
+    }
+
     if not all([student_id, exam_session_id]):
-        return jsonify({"error": "Missing required identifiers (student/exam session ID)."}), 400
+        print(f"[ERROR] Missing required identifiers. student_id: {student_id}, session_id: {exam_session_id}")
+        return jsonify({"error": "Missing required identifiers (student/exam/calibration session ID)."}), 400
 
     try:
         # 1. Retrieve Personalized Baseline (This contains the Threshold and Stats)
         # This baseline is used for personalized Z-score normalization (Step 2)
+        print(f"[DEBUG] Attempting to retrieve baseline for student_id: {student_id}")
         baseline = get_student_baseline(student_id)
-        if not baseline:
-             return jsonify({"error": "Personalized baseline not found. Student must complete calibration."}), 500
+        if baseline:
+            print(f"[DEBUG] Baseline found for student_id: {student_id}")
+        else:
+            print(f"[DEBUG] No baseline found for student_id: {student_id}")
+            return jsonify({
+                "status": "no_baseline",
+                "message": "Personalized baseline not found. Student must complete calibration.",
+                "analysis": None
+            }), 200
 
         baseline_stats = baseline['stats']
         personalized_threshold = baseline['system_threshold']
@@ -56,7 +80,7 @@ def analyze_behavior():
         # 3. Anomaly Prediction
         k_anomaly_score = 0
         m_anomaly_score = 0
-        video_anomaly_score = 0.0 # Placeholder for video feed analysis result
+        
 
         # Predict Key anomaly score using the pre-loaded model
         if k_normalized_features:
@@ -73,7 +97,7 @@ def analyze_behavior():
         final_risk_score = calculate_fusion_score(
             k_anomaly_score, 
             m_anomaly_score, 
-            video_anomaly_score
+            
         )
         
         # 5. Threshold Check and Incident Logging

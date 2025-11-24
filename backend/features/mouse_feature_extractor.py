@@ -19,25 +19,34 @@ class MouseFeatureExtractor:
     def _calculate_features(self, raw_events: List[Dict]) -> Dict[str, float]:
         """
         Calculates raw features from a list of mouse events (Your provided logic).
+        Accepts both 'timestamp' and 't' as valid time fields.
         """
+        import logging
         if not raw_events:
             return {name: 0.0 for name in self.feature_names}
 
+        # Normalize time field
+        for event in raw_events:
+            if 'timestamp' not in event and 't' in event:
+                event['timestamp'] = event['t']
+            if 'timestamp' not in event:
+                logging.warning(f"Mouse event missing timestamp: {event}")
+
         df = pd.DataFrame(raw_events)
-        
+
         # Calculate Duration per event (Time since previous event)
         df['timestamp'] = df['timestamp'].astype(float)
         df['prev_timestamp'] = df['timestamp'].shift(1)
         df['duration'] = df['timestamp'] - df['prev_timestamp']
-        df['duration'] = df['duration'].fillna(0) 
+        df['duration'] = df['duration'].fillna(0)
 
         # 1. Inactive Duration
-        inactive_sum = df[df['tab'] != 'active']['duration'].sum()
+        inactive_sum = df[df.get('tab', 'active') != 'active']['duration'].sum() if 'tab' in df else 0.0
 
         # 2. Event Counters
-        copy_cut_sum = len(df[df['event_type'].isin(['copy', 'cut'])])
-        paste_sum = len(df[df['event_type'] == 'paste'])
-        double_click_sum = len(df[df['event_type'] == 'dblclick'])
+        copy_cut_sum = len(df[df.get('event_type', '') .isin(['copy', 'cut'])]) if 'event_type' in df else 0
+        paste_sum = len(df[df.get('event_type', '') == 'paste']) if 'event_type' in df else 0
+        double_click_sum = len(df[df.get('event_type', '') == 'dblclick']) if 'event_type' in df else 0
 
         raw_features = {
             "inactive_duration": float(inactive_sum),
@@ -45,7 +54,7 @@ class MouseFeatureExtractor:
             "paste": float(paste_sum),
             "double_click": float(double_click_sum)
         }
-        
+
         return raw_features
 
     def extract_features(self, events: List[Dict], baseline_stats: Union[Dict, None] = None) -> Tuple[List[float], Union[Dict, None]]:
