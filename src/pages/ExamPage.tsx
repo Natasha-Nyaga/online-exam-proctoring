@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
-import { AlertCircle, Clock } from "lucide-react";
+
+// --- CONFIGURATION ---
+// IMPORTANT: Replace with your actual backend URL for the anomaly endpoint
+const ANALYZE_BEHAVIOR_ENDPOINT = "http://localhost:5000/api/exam/analyze_behavior";
+const MONITORING_INTERVAL_MS = 10000; // 10 seconds
 
 interface Question {
   id: string;
@@ -23,6 +27,8 @@ const ExamPage = () => {
   const { examId } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  // --- Exam State ---
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -31,7 +37,62 @@ const ExamPage = () => {
   const [examTitle, setExamTitle] = useState("");
   const [loading, setLoading] = useState(true);
   const [studentId, setStudentId] = useState<string>("");
+  const [isAlerted, setIsAlerted] = useState(false);
 
+  // --- Biometric Buffers ---
+  const mouseBuffer = useRef<any[]>([]);
+  const keyBuffer = useRef<any[]>([]);
+  const lastSubmissionTime = useRef<number>(Date.now());
+
+  // =========================================================================
+  // SECTION 1: CORE EXAM LOGIC (TIME, QUESTIONS, ANSWERS)
+  // =========================================================================
+
+  const handleSubmit = useCallback(async () => {
+    if (!sessionId) return;
+
+    // Clear the anomaly monitoring interval to ensure no data is sent after submission
+    // (This requires the interval to be defined outside of this function scope or cleared 
+    // using a ref if necessary, but stopping the page navigation is usually enough.)
+
+    try {
+      // 1. Save all answers
+      const answerInserts = Object.entries(answers).map(([questionId, answer]) => ({
+        session_id: sessionId,
+        question_id: questionId,
+        answer_text: answer,
+        // Assuming your 'answers' table can handle upserts/inserts based on session_id + question_id
+      }));
+
+      // NOTE: This insert needs to be robust (handle existing answers gracefully)
+      // A simple insert will fail if answers already exist. Consider a batch upsert or 'on conflict' logic.
+      await supabase.from("answers").upsert(answerInserts, { onConflict: 'session_id, question_id' });
+
+
+      // 2. Update session status
+      await supabase
+        .from("exam_sessions")
+        .update({ status: "completed", completed_at: new Date().toISOString() })
+        .eq("id", sessionId);
+
+      toast({
+        title: "Exam submitted!",
+        description: "Your answers have been recorded.",
+        className: "bg-success text-success-foreground",
+      });
+
+      navigate("/exam-complete");
+    } catch (error) {
+      console.error("Submission Error:", error);
+      toast({
+        title: "Error",
+        description: "Failed to submit exam",
+        className: "bg-error text-error-foreground",
+      });
+    }
+  }, [sessionId, answers, navigate, toast]); // Added handleSubmit to dependencies
+
+  // --- Exam Initialization (Runs once) ---
   useEffect(() => {
     const initializeExam = async () => {
       const { data: userData } = await supabase.auth.getUser();
@@ -40,67 +101,34 @@ const ExamPage = () => {
         navigate("/student-login");
         return;
       }
-      setStudentId(userData.user.id);
+      const currentStudentId = userData.user.id;
+      setStudentId(currentStudentId);
 
-      // Check for existing paused session
-      const { data: existingSession } = await supabase
-        .from("exam_sessions")
-        .select("*")
-        .eq("exam_id", examId)
-        .eq("student_id", session.user.id)
-        .eq("status", "in_progress")
-        .single();
+      // 1. Check for existing paused session (and get exam details)
+      const [{ data: existingSession }, { data: examData }] = await Promise.all([
+        supabase.from("exam_sessions").select("*").eq("exam_id", examId).eq("student_id", currentStudentId).eq("status", "in_progress").single(),
+        supabase.from("exams").select("title, duration_minutes").eq("id", examId).single(),
+      ]);
 
-      // Get exam details
-      const { data: examData } = await supabase
-        .from("exams")
-        .select("title, duration_minutes")
-        .eq("id", examId)
-        .single();
+      if (!examData) {
+        setLoading(false);
+        toast({ title: "Error", description: "Exam not found.", variant: "destructive" });
+        return;
+      }
 
-      if (examData) {
-        setExamTitle(examData.title);
+      setExamTitle(examData.title);
+
+      let currentSessionId: string | null = null;
+      let initialTimeLeft = examData.duration_minutes * 60;
+
+      // Calculate remaining time if resuming
+      if (existingSession) {
+        const elapsedSeconds = Math.floor(
+          (Date.now() - new Date(existingSession.started_at).getTime()) / 1000
+        );
+        initialTimeLeft = Math.max(0, (examData.duration_minutes * 60) - elapsedSeconds);
+        currentSessionId = existingSession.id;
         
-        // Calculate remaining time if resuming
-        if (existingSession) {
-          const elapsedMinutes = Math.floor(
-            (Date.now() - new Date(existingSession.started_at).getTime()) / 60000
-          );
-          const remainingMinutes = examData.duration_minutes - elapsedMinutes;
-          setTimeLeft(Math.max(0, remainingMinutes * 60));
-          setSessionId(existingSession.id);
-        } else {
-          setTimeLeft(examData.duration_minutes * 60);
-        }
-      }
-
-      // Get questions
-      const { data: questionsData } = await supabase
-        .from("questions")
-        .select("*")
-        .eq("exam_id", examId)
-        .order("order_number");
-
-      if (questionsData) {
-        setQuestions(questionsData);
-      }
-
-      // Create or use existing exam session
-      if (!existingSession) {
-        const { data: sessionData } = await supabase
-          .from("exam_sessions")
-          .insert({
-            exam_id: examId,
-            student_id: session.user.id,
-            status: "in_progress",
-          })
-          .select()
-          .single();
-
-        if (sessionData) {
-          setSessionId(sessionData.id);
-        }
-      } else {
         // Load previous answers
         const { data: previousAnswers } = await supabase
           .from("answers")
@@ -114,16 +142,48 @@ const ExamPage = () => {
           }, {} as Record<string, string>);
           setAnswers(answersMap);
         }
+
+      } else {
+        // Create new exam session
+        const { data: sessionData } = await supabase
+          .from("exam_sessions")
+          .insert({
+            exam_id: examId,
+            student_id: currentStudentId,
+            status: "in_progress",
+          })
+          .select()
+          .single();
+
+        if (sessionData) {
+          currentSessionId = sessionData.id;
+        }
+      }
+
+      setSessionId(currentSessionId);
+      setTimeLeft(initialTimeLeft);
+      
+      // Get questions
+      const { data: questionsData } = await supabase
+        .from("questions")
+        .select("*")
+        .eq("exam_id", examId)
+        .order("order_number");
+
+      if (questionsData) {
+        setQuestions(questionsData);
       }
 
       setLoading(false);
     };
     initializeExam();
-  }, [examId, navigate]);
+  }, [examId, navigate, toast]);
 
+  // --- Timer Countdown ---
   useEffect(() => {
+    if (loading || !sessionId) return;
     if (timeLeft <= 0) {
-      handleSubmit();
+      handleSubmit(); // Auto-submit when time runs out
       return;
     }
 
@@ -132,7 +192,8 @@ const ExamPage = () => {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [timeLeft, loading, sessionId, handleSubmit]);
+
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -156,40 +217,128 @@ const ExamPage = () => {
     }
   };
 
-  const handleSubmit = async () => {
-    if (!sessionId) return;
+  // =========================================================================
+  // SECTION 2: BIOMETRIC DATA COLLECTION
+  // =========================================================================
 
-    try {
-      // Save all answers
-      const answerInserts = Object.entries(answers).map(([questionId, answer]) => ({
+  // --- Event Listeners ---
+  useEffect(() => {
+    const getTabStatus = () => (!document.hidden ? 'active' : 'inactive');
+    
+    // Mouse event handler (captures move, copy, cut, paste, dblclick)
+    const handleMouseEvent = (type: string, e: MouseEvent | Event) => {
+      // Use MouseEvent to ensure clientX/Y exist, default to 0 for other events
+      const mouseEvent = e as MouseEvent; 
+
+      mouseBuffer.current.push({
+        event_type: type,
+        tab: getTabStatus(),
+        timestamp: Date.now(),
+        x: mouseEvent.clientX || 0,
+        y: mouseEvent.clientY || 0
+      });
+    };
+
+    // Keystroke handler (captures key presses)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      keyBuffer.current.push({
+        event_type: 'keypress',
+        key: e.key,
+        timestamp: Date.now(),
+        tab: getTabStatus(),
+      });
+    };
+    
+    // Tab Visibility Change handler (for 'focus'/'blur' behavior)
+    const onVisibilityChange = () => {
+      handleMouseEvent(document.hidden ? 'blur' : 'focus', new Event('')); // Pass a generic event
+    };
+
+    // Attach Listeners
+    window.addEventListener('mousemove', (e) => handleMouseEvent('move', e));
+    window.addEventListener('copy', (e) => handleMouseEvent('copy', e));
+    window.addEventListener('cut', (e) => handleMouseEvent('cut', e));
+    window.addEventListener('paste', (e) => handleMouseEvent('paste', e));
+    window.addEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('keydown', handleKeyDown);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('mousemove', (e) => handleMouseEvent('move', e));
+      window.removeEventListener('copy', (e) => handleMouseEvent('copy', e));
+      window.removeEventListener('cut', (e) => handleMouseEvent('cut', e));
+      window.removeEventListener('paste', (e) => handleMouseEvent('paste', e));
+      window.removeEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // --- Data Sender Interval ---
+  useEffect(() => {
+    if (!sessionId || !studentId) return;
+
+    const sendBiometrics = async () => {
+      if (mouseBuffer.current.length === 0 && keyBuffer.current.length === 0) return;
+
+      const currentTime = Date.now();
+      
+      const payload = {
+        student_id: studentId,
+        exam_id: examId,
         session_id: sessionId,
-        question_id: questionId,
-        answer_text: answer,
-      }));
+        start_timestamp: lastSubmissionTime.current, // Start of the current window
+        end_timestamp: currentTime,
+        mouse_events: [...mouseBuffer.current],
+        key_events: [...keyBuffer.current],
+        // NOTE: Video score would be added here if you implemented video analytics
+        // video_score: [latest_video_analysis_score] 
+      };
 
-      await supabase.from("answers").insert(answerInserts);
+      // Clear buffers and update last submission time immediately
+      mouseBuffer.current = [];
+      keyBuffer.current = [];
+      lastSubmissionTime.current = currentTime;
 
-      // Update session status
-      await supabase
-        .from("exam_sessions")
-        .update({ status: "completed", completed_at: new Date().toISOString() })
-        .eq("id", sessionId);
+      try {
+        const response = await fetch(ANALYZE_BEHAVIOR_ENDPOINT, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
 
-      toast({
-        title: "Exam submitted!",
-        description: "Your answers have been recorded.",
-        className: "bg-success text-success-foreground",
-      });
+        const data = await response.json();
+        console.log("AI Analysis:", data);
 
-      navigate("/exam-complete");
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to submit exam",
-        className: "bg-error text-error-foreground",
-      });
-    }
-  };
+        // Check for high anomaly score from the Fusion Model
+        if (data.analysis?.fusion_risk_score > 0.7) { // Assuming risk score is 0 to 1
+            setIsAlerted(true); // Set state to show a visual warning to the student/admin
+            toast({
+              title: "Security Alert!",
+              description: "Suspicious behavior detected. Your session is being closely monitored.",
+              className: "bg-error text-error-foreground",
+              duration: 5000,
+            });
+        }
+
+      } catch (error) {
+        console.error("Error sending biometrics:", error);
+      }
+    };
+
+    const interval = setInterval(sendBiometrics, MONITORING_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [sessionId, studentId, examId, toast]);
+
+  // =========================================================================
+  // SECTION 3: RENDER
+  // =========================================================================
 
   if (loading) {
     return <div className="flex items-center justify-center min-h-screen">Loading exam...</div>;
@@ -202,18 +351,17 @@ const ExamPage = () => {
   return (
     <div className="min-h-screen bg-background">
       {/* Monitoring Notice */}
-      <div className="bg-error text-error-foreground px-4 py-2 flex items-center justify-center gap-2">
-        <div className="flex items-center gap-2 animate-pulse">
-          <div className="h-3 w-3 rounded-full bg-error-foreground" />
+      <div className={`px-4 py-2 flex items-center justify-center gap-2 ${isAlerted ? 'bg-red-700 text-white animate-pulse' : 'bg-error text-error-foreground'}`}>
+        <div className="flex items-center gap-2">
+          <div className={`h-3 w-3 rounded-full ${isAlerted ? 'bg-white' : 'bg-error-foreground'}`} />
           <AlertCircle className="h-4 w-4" />
         </div>
-        <span className="font-medium">Monitoring in Progress</span>
+        <span className="font-medium">Monitoring in Progress {isAlerted ? '(HIGH ALERT)' : ''}</span>
       </div>
-
-      {/* Monitoring component removed: ExamMonitor was deleted */}
 
       {/* Header */}
       <header className="border-b bg-secondary shadow-sm">
+        {/* ... (Header content remains the same) ... */}
         <div className="container mx-auto px-4 py-4">
           <div className="flex justify-between items-center mb-4">
             <h1 className="text-xl font-bold text-secondary-foreground">{examTitle}</h1>
@@ -238,6 +386,7 @@ const ExamPage = () => {
 
       {/* Question */}
       <main className="container mx-auto px-4 py-8">
+        {/* ... (Main content remains the same) ... */}
         <Card className="max-w-3xl mx-auto">
           <CardContent className="pt-6">
             <h2 className="text-lg font-semibold mb-6">{currentQuestion?.question_text}</h2>
