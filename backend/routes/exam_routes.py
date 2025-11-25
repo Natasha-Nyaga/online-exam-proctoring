@@ -1,11 +1,12 @@
 import joblib
 from flask import Blueprint, request, jsonify
 from utils.db_helpers import get_student_baseline, save_anomaly_record 
-from utils.load_models import mouse_model, keystroke_model, mouse_rt_model, keystroke_rt_model
+from utils.load_models import mouse_model, keystroke_model
 from features.keystroke_feature_extractor import KeystrokeFeatureExtractor
 from features.mouse_feature_extractor import MouseFeatureExtractor
 import numpy as np
-from utils.session_state import SESSION_FEATURE_HISTORY, ROLLING_WINDOW_SIZE
+import pandas as pd
+from utils.session_state import SESSION_FEATURE_HISTORY
 
 # Initialize the Blueprint
 exam_bp = Blueprint('exam', __name__)
@@ -13,6 +14,10 @@ exam_bp = Blueprint('exam', __name__)
 # Initialize extractors (must be consistent with calibration_routes)
 KEYSTROKE_FE = KeystrokeFeatureExtractor()
 MOUSE_FE = MouseFeatureExtractor()
+
+# --- Statistical Constants for Stability ---
+EPSILON = 1e-6          # Laplace smoothing constant for stability
+MAX_Z_SCORE_CLIP = 10.0 # Maximum Z-score magnitude allowed into the ML model
 
 # --- Utility Feature Lists ---
 KEYSTROKE_BASE_FEATURES = [
@@ -26,21 +31,33 @@ MOUSE_BASE_FEATURES = [
 ]
 
 def normalize_features(feature_vector_raw, baseline_stats, feature_type='keystroke'):
-    """Applies Z-score normalization to the feature vector using baseline stats."""
+    """Applies Z-score normalization (with stability and clipping) to the feature vector."""
     baseline_detailed_stats = baseline_stats['stats'][feature_type]['detailed_stats']
     feature_keys = KEYSTROKE_BASE_FEATURES if feature_type == 'keystroke' else MOUSE_BASE_FEATURES
 
     if feature_type == 'keystroke':
-        base_means = np.array([baseline_detailed_stats[key]['mean'] for key in feature_keys])
-        base_stds = np.array([baseline_detailed_stats[key]['std'] for key in feature_keys])
+        base_means = np.array([baseline_detailed_stats.get(key, {}).get('mean', 0.0) for key in feature_keys])
+        base_stds = np.array([baseline_detailed_stats.get(key, {}).get('std', 1.0) for key in feature_keys])
+        
+        # Keystroke features include both mean and std metrics, hence the concatenation
         normalization_means = np.concatenate([base_means, base_means])
         normalization_stds = np.concatenate([base_stds, base_stds])
     else:
-        normalization_means = np.array([baseline_detailed_stats[key]['mean'] for key in feature_keys])
-        normalization_stds = np.array([baseline_detailed_stats[key]['std'] for key in feature_keys])
-    epsilon = 1e-6
-    feature_vector_normalized = (feature_vector_raw - normalization_means) / (normalization_stds + epsilon)
-    return feature_vector_normalized
+        normalization_means = np.array([baseline_detailed_stats.get(key, {}).get('mean', 0.0) for key in feature_keys])
+        normalization_stds = np.array([baseline_detailed_stats.get(key, {}).get('std', 1.0) for key in feature_keys])
+        
+    # --- Fix 1: Laplace Smoothing (Already present, kept for stability) ---
+    feature_vector_normalized_stable = (feature_vector_raw - normalization_means) / (normalization_stds + EPSILON)
+    
+    # --- Fix 2: Z-Score Clipping (CRITICAL FIX) ---
+    # Prevents extreme outliers (e.g., 10000) from breaking the ML model.
+    feature_vector_normalized_clipped = np.clip(
+        feature_vector_normalized_stable, 
+        -MAX_Z_SCORE_CLIP, 
+        MAX_Z_SCORE_CLIP
+    )
+    
+    return feature_vector_normalized_clipped
 
 def calculate_fusion_score(k_score, m_score, v_score):
     """
@@ -86,8 +103,10 @@ def analyze_behavior():
                 "analysis": None
             }), 200
 
+        print(f"[BASELINE CHECK] Baseline found for student_id: {student_id}: {baseline}") # Log full baseline for debug
+        
         baseline_stats = baseline['stats']
-        personalized_threshold = baseline['system_threshold']
+        personalized_threshold = baseline.get('system_threshold', 2.0) # Default to 2.0 if not found
         try:
             k_detailed_stats = baseline_stats['keystroke']['detailed_stats']
             m_detailed_stats = baseline_stats['mouse']['detailed_stats']
@@ -103,101 +122,90 @@ def analyze_behavior():
         # Extract raw features (no normalization)
         k_features_raw_current, _ = KEYSTROKE_FE.extract_features(key_events, baseline_stats=None)
         m_features_raw_current, _ = MOUSE_FE.extract_features(mouse_events, baseline_stats=None)
+        # Convert to dict if returned as list
+        if isinstance(k_features_raw_current, list):
+            k_features_raw_current = dict(zip(KEYSTROKE_BASE_FEATURES + [f'std_{f}' for f in KEYSTROKE_BASE_FEATURES], k_features_raw_current))
+        if isinstance(m_features_raw_current, list):
+            m_features_raw_current = dict(zip(MOUSE_BASE_FEATURES, m_features_raw_current))
         SESSION_FEATURE_HISTORY[exam_session_id]['keystroke'].append(k_features_raw_current)
         SESSION_FEATURE_HISTORY[exam_session_id]['mouse'].append(m_features_raw_current)
 
-
-        # Convert history to numpy arrays
-        k_history = np.array(SESSION_FEATURE_HISTORY[exam_session_id]['keystroke'])
-        m_history = np.array(SESSION_FEATURE_HISTORY[exam_session_id]['mouse'])
+        # Convert history to pandas DataFrames
+        k_history_df = pd.DataFrame(SESSION_FEATURE_HISTORY[exam_session_id]['keystroke'])
+        m_history_df = pd.DataFrame(SESSION_FEATURE_HISTORY[exam_session_id]['mouse'])
 
         # Safeguard: Only run prediction if enough history is present
-        if len(k_history) < 2 or len(m_history) < 2:
+        if len(k_history_df) < 2 or len(m_history_df) < 2:
             return jsonify({
                 "risk_score": 0.0,
                 "message": "Gathering initial data points."
             }), 200
 
-        # --- Keystroke Feature Aggregation (Exclude keystroke_count) ---
-        # Separate latency features (columns 0-9) and keystroke_count (column 10)
-        k_history_latency = k_history[:, :10]  # shape (N, 10)
-        k_history_count = k_history[:, 10]    # shape (N,)
+        # --- Step 2: Prepare LTS Model Inputs ---
+        # Normalize current features using personalized baseline
+        k_feature_names = KEYSTROKE_BASE_FEATURES + [f'std_{f}' for f in KEYSTROKE_BASE_FEATURES]
+        k_features_raw_array = np.array([k_features_raw_current.get(f, 0.0) for f in k_feature_names])
+        m_features_raw_array = np.array([m_features_raw_current.get(f, 0.0) for f in MOUSE_BASE_FEATURES])
+        
+        # Pass baseline_stats['keystroke']['detailed_stats'] and baseline_stats['mouse']['detailed_stats'] to normalization
+        k_lts_input_array = normalize_features(k_features_raw_array, {'stats': {'keystroke': {'detailed_stats': k_detailed_stats}}}, feature_type='keystroke')
+        k_lts_input = pd.DataFrame([k_lts_input_array], columns=k_feature_names)
+        
+        m_lts_input_array = normalize_features(m_features_raw_array, {'stats': {'mouse': {'detailed_stats': m_detailed_stats}}}, feature_type='mouse')
+        m_lts_input = pd.DataFrame([m_lts_input_array], columns=MOUSE_BASE_FEATURES)
 
-        # LTS Feature Vector (mean & std of all latency features)
-        V_k_lts_raw_latency = np.concatenate([
-            np.mean(k_history_latency, axis=0),
-            np.std(k_history_latency, axis=0)
-        ])  # shape (20,)
-        V_k_lts = normalize_features(V_k_lts_raw_latency, baseline, feature_type='keystroke')
-        print(f"DEBUG: V_k_lts shape (1D): {V_k_lts.shape}")
-        V_k_lts_input = V_k_lts.reshape(1, -1)
-        print(f"DEBUG: V_k_lts_input shape (2D): {V_k_lts_input.shape}")
+        # Print the final, stabilized, and clipped Z-scores being fed into the model
+        print(f"[MODEL INPUT] Stabilized and Clipped Keystroke Z-Scores (First 5): {k_lts_input_array[:5]}")
+        print(f"[MODEL INPUT] Stabilized and Clipped Mouse Z-Scores: {m_lts_input_array}")
 
-        # RT Feature Vector (mean & std of last N latency windows)
-        k_history_rt_latency = k_history_latency[-ROLLING_WINDOW_SIZE:]
-        V_k_rt_raw_latency = np.concatenate([
-            np.mean(k_history_rt_latency, axis=0),
-            np.std(k_history_rt_latency, axis=0)
-        ])  # shape (20,)
-        V_k_rt = normalize_features(V_k_rt_raw_latency, baseline, feature_type='keystroke')
-        V_k_rt_input = V_k_rt.reshape(1, -1)
+        # Get anomaly scores using pipeline directly
+        k_lts_score = float(keystroke_model.predict_proba(k_lts_input)[0, 1]) if keystroke_model is not None else 0.0
+        
+        # For SVM, use decision_function (or predict_proba if available)
+        try:
+            m_lts_score = float(mouse_model.decision_function(m_lts_input)[0]) if mouse_model is not None else 0.0
+        except AttributeError:
+            m_lts_score = float(mouse_model.predict_proba(m_lts_input)[0, 1]) if mouse_model is not None else 0.0
 
-        # Mouse LTS: sum of all history
-        V_m_lts_raw = np.sum(m_history, axis=0)
-        V_m_lts = normalize_features(V_m_lts_raw, baseline, feature_type='mouse')
-
-        # Mouse RT: mean of last N windows
-        m_history_rt = m_history[-ROLLING_WINDOW_SIZE:]
-        V_m_rt_raw = np.mean(m_history_rt, axis=0)
-        V_m_rt = normalize_features(V_m_rt_raw, baseline, feature_type='mouse')
-
-        # --- Step 3: Dual Prediction and Hybrid Fusion ---
-        # Reshape for model input
-        V_k_rt_input = V_k_rt.reshape(1, -1)
-        V_k_lts_input = V_k_lts.reshape(1, -1)
-        V_m_rt_input = V_m_rt.reshape(1, -1)
-        V_m_lts_input = V_m_lts.reshape(1, -1)
-
-        # Get anomaly scores
-        k_rt_score = float(keystroke_rt_model.predict_proba(V_k_rt_input)[0, 1]) if keystroke_rt_model is not None else 0.0
-        k_lts_score = float(keystroke_model.predict_proba(V_k_lts_input)[0, 1]) if keystroke_model is not None else 0.0
-        m_rt_score = float(mouse_rt_model.predict_proba(V_m_rt_input)[0, 1]) if mouse_rt_model is not None else 0.0
-        m_lts_score = float(mouse_model.predict_proba(V_m_lts_input)[0, 1]) if mouse_model is not None else 0.0
-
-        # Hybrid fusion
-        def calculate_fusion_score_hybrid(k_rt, k_lts, m_rt, m_lts, v_score=0):
-            return (0.30 * k_lts) + (0.15 * k_rt) + (0.30 * m_lts) + (0.15 * m_rt) + (0.10 * v_score)
-
-        final_risk_score = calculate_fusion_score_hybrid(k_rt_score, k_lts_score, m_rt_score, m_lts_score, v_score=0)
+        # Fusion score (simple average)
+        # Note: Fusion score calculation should typically include a proper sigmoid/scaling of the SVM decision function output (m_lts_score)
+        fusion_score = (0.5 * k_lts_score) + (0.5 * m_lts_score)
 
         # Threshold check and incident logging
         incident_logged = False
-        if final_risk_score >= personalized_threshold:
+        if fusion_score >= personalized_threshold:
             incident_details = {
-                "keystroke_rt_score": k_rt_score,
                 "keystroke_lts_score": k_lts_score,
-                "mouse_rt_score": m_rt_score,
                 "mouse_lts_score": m_lts_score,
                 "threshold_exceeded": float(personalized_threshold),
                 "timestamp_end": data.get('end_timestamp')
             }
             incident_logged = save_anomaly_record(
                 session_id=exam_session_id,
-                final_risk_score=final_risk_score,
+                final_risk_score=fusion_score,
                 incident_details=incident_details
             )
+
+        # Count cheating incidents for this session
+        from utils.db_helpers import supabase
+        incident_count = 0
+        try:
+            response = supabase.table('cheating_incidents').select('id').eq('session_id', exam_session_id).execute()
+            if hasattr(response, 'data') and response.data:
+                incident_count = len(response.data)
+        except Exception as e:
+            print(f"[ERROR] Could not count cheating incidents: {e}")
 
         # Respond to frontend
         return jsonify({
             "status": "analyzed",
             "analysis": {
-                "keystroke_rt_score": k_rt_score,
                 "keystroke_lts_score": k_lts_score,
-                "mouse_rt_score": m_rt_score,
                 "mouse_lts_score": m_lts_score,
-                "fusion_risk_score": float(final_risk_score),
+                "fusion_risk_score": float(fusion_score),
                 "personalized_threshold": float(personalized_threshold),
-                "incident_logged": incident_logged
+                "incident_logged": incident_logged,
+                "cheating_incident_count": incident_count
             }
         }), 200
 

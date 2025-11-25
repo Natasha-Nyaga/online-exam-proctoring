@@ -1,7 +1,7 @@
 
 import { useRef } from "react";
 
-export type CursorPos = { x: number; y: number; t: number; click?: boolean };
+export type CursorPos = { x: number; y: number; timestamp: number; type?: string; click?: boolean };
 
 export function useMouseDynamics() {
   const cursorPositions = useRef<CursorPos[]>([]);

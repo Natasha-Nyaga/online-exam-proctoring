@@ -24,22 +24,80 @@ interface CalibrationQuestion {
 }
 
 const CALIBRATION_QUESTIONS: CalibrationQuestion[] = [
-    { id: 1, type: "essay", text: "Describe your typical study routine and how you prepare for exams. Include details about your study environment, time management, and preferred learning methods." },
-    { id: 2, type: "essay", text: "What are your academic goals for this course? Explain what you hope to learn and how you plan to achieve these goals." },
-    { id: 3, type: "mcq", text: "How would you rate your confidence level in taking online exams?", options: ["Very confident", "Somewhat confident", "Neutral", "Somewhat uncertain", "Very uncertain"] },
-    { id: 4, type: "mcq", text: "Which learning style do you prefer most?", options: ["Visual (diagrams, charts)", "Auditory (lectures, discussions)", "Reading/Writing", "Kinesthetic (hands-on)", "Multimodal (combination)"] },
-    { id: 5, type: "essay", text: "Reflect on a challenging academic experience you've faced and how you overcame it. What did you learn from this experience?" },
-    { id: 6, type: "mcq", text: "How many hours per week do you typically dedicate to studying for this course?", options: ["Less than 3 hours", "3-5 hours", "6-10 hours", "11-15 hours", "More than 15 hours"] },
+{ id: 1, type: "essay", text: "Describe your typical study routine and how you prepare for exams. Include details about your study environment, time management, and preferred learning methods." },
+
+{ id: 2, type: "essay", text: "What are your academic goals for this course? Explain what you hope to learn and how you plan to achieve these goals." },
+
+{ id: 3, type: "essay", text: "Reflect on a challenging academic experience you've faced and how you overcame it. What did you learn from this experience?" },
+
+{ id: 4, type: "essay", text: "Explain how you manage distractions while studying or taking online exams. What strategies help you stay focused?" },
+
+{ id: 5, type: "essay", text: "Describe your ideal learning environment and how it influences your performance in online or in-person classes." },
+
+{ id: 6, type: "essay", text: "Discuss how you usually prepare for high-pressure academic tasks. How do you manage stress and maintain productivity?" },
+
+{ id: 7, type: "essay", text: "Explain a study technique or learning method that has significantly improved your academic performance. Why does it work for you?" },
+
+{ id: 8, type: "essay", text: "Describe how you balance academic responsibilities with other commitments such as work, family, or extracurricular activities." },
+
+{ id: 9, type: "essay", text: "In your own words, explain what motivates you to perform well academically. How do you stay motivated throughout the semester?" },
+
+{ id: 10, type: "essay", text: "Reflect on a time when you had to learn a difficult concept. How did you approach it, and what steps did you take to fully understand it?" }
 ];
 
 const CALIBRATION_DURATION = 10 * 60;
 const DEFAULT_COURSE_NAME = "General";
 const DEFAULT_THRESHOLD = 0.8;
 
+export interface CursorPos {
+    type: string;
+    timestamp: number;
+    x: number;
+    y: number;
+}
+
 const CalibrationPage = () => {
 
     const keystrokeDynamics = useKeystrokeDynamics();
     const mouseDynamics = useMouseDynamics();
+
+    // --- Global  Listeners for Behavioral Events ---
+    useEffect(() => {
+        // Mouse event handler (captures move, copy, cut, paste, dblclick)
+        const handleMouseEvent = (type: string, e: MouseEvent | Event) => {
+            const mouseEvent = e as MouseEvent;
+            if (mouseDynamics.cursorPositions && mouseDynamics.cursorPositions.current) {
+                mouseDynamics.cursorPositions.current.push({
+                    type,
+                    timestamp: Date.now(),
+                    x: mouseEvent.clientX || 0,
+                    y: mouseEvent.clientY || 0
+                });
+            }
+        };
+
+        // Tab Visibility Change handler (for 'focus'/'blur' behavior)
+        const onVisibilityChange = () => {
+            handleMouseEvent(document.hidden ? 'blur' : 'focus', new Event(''));
+        };
+
+        window.addEventListener('mousemove', (e) => handleMouseEvent('move', e));
+        window.addEventListener('copy', (e) => handleMouseEvent('copy', e));
+        window.addEventListener('cut', (e) => handleMouseEvent('cut', e));
+        window.addEventListener('paste', (e) => handleMouseEvent('paste', e));
+        window.addEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
+        document.addEventListener('visibilitychange', onVisibilityChange);
+
+        // Cleanup
+        return () => {
+            window.removeEventListener('mousemove', (e) => handleMouseEvent('move', e));
+            window.removeEventListener('copy', (e) => handleMouseEvent('copy', e));
+            window.removeEventListener('cut', (e) => handleMouseEvent('cut', e));
+            window.removeEventListener('paste', (e) => handleMouseEvent('paste', e));
+            window.removeEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [mouseDynamics]);
 
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();

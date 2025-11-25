@@ -1,3 +1,10 @@
+def stable_z_score(measurement, mean, std, epsilon=1e-6):
+    """
+    Returns a stable Z-score for a measurement given mean and std,
+    using Laplace smoothing to prevent division by zero or near-zero std.
+    """
+    return (measurement - mean) / (std + epsilon)
+
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Union, Tuple
@@ -142,6 +149,6 @@ class KeystrokeFeatureExtractor:
             stats = baseline_stats.get(name, {'mean': 0.0, 'std': 1.0})
             mean = stats['mean']
             std = stats['std']
-            normalized_value = (value - mean) / std if std > 0.0 else 0.0
+            normalized_value = stable_z_score(value, mean, std)
             normalized_features.append(normalized_value)
         return normalized_features, None

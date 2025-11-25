@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
-from flask import Flask 
-from flask_cors import CORS 
+from flask import Flask, jsonify
+
+from flask_cors import CORS
 
 # Load environment variables from .env file FIRST
 load_dotenv()
@@ -19,9 +20,10 @@ from routes.exam_routes import exam_bp
 
 # --- Flask App Setup ---
 
+
 # Define the Flask application
 app = Flask(__name__)
-CORS(app, resources={r"/api/*": {"origins": "http://localhost:8080"}})
+CORS(app, supports_credentials=True, origins=["http://localhost:8080"])
 
 # Basic configuration
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'default-dev-key')
@@ -46,6 +48,13 @@ def health_check():
     return "Proctoring Backend Running", 200
 
 if __name__ == '__main__':
+
+    # Global error handler to ensure CORS headers on errors
+    @app.errorhandler(Exception)
+    def handle_exception(e):
+        response = jsonify(message=str(e))
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response, 500
     # Ensure this block uses the correct debug setting
     debug_mode = app.config['ENV'] == 'development'
     print("Server running in development mode." if debug_mode else "Server running in production mode.")
