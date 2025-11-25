@@ -12,16 +12,24 @@ import { render, fireEvent, screen } from '@testing-library/react';
 import CalibrationPage from './CalibrationPage';
 import { supabase } from '@/integrations/supabase/client';
 // Mock supabase.auth.getSession to return a valid session
-supabase.auth = {
-  getSession: jest.fn().mockResolvedValue({
+if (supabase.auth && typeof supabase.auth.getSession === 'function') {
+  jest.spyOn(supabase.auth, 'getSession').mockResolvedValue({
     data: {
       session: {
-        user: { id: 'test-student-id' },
+        user: { id: 'test-student-id' } as any,
         access_token: 'test-access-token',
-      },
+        // Add required fields to satisfy the Session type
+        expires_in: 3600,
+        refresh_token: 'test-refresh-token',
+        token_type: 'bearer',
+        provider_token: null,
+        provider_refresh_token: null,
+        user_metadata: {},
+        created_at: new Date().toISOString(),
+      } as any,
     },
-  }),
-};
+  });
+}
 
 // Mock supabase.from to simulate calibration session creation
 supabase.from = jest.fn().mockReturnValue({
@@ -60,9 +68,15 @@ jest.mock('@/hooks/use-toast', () => ({
 }));
 
 // Mock useState to force loading = false for tests
-jest.spyOn(React, 'useState').mockImplementation((initial) => {
-  if (initial === true) return [false, jest.fn()];
-  return [initial, jest.fn()];
+jest.mock('react', () => {
+  const actualReact = jest.requireActual('react');
+  return {
+    ...actualReact,
+    useState: (initial: any) => {
+      if (initial === true) return [false, jest.fn()];
+      return [initial, jest.fn()];
+    }
+  };
 });
 
 describe('CalibrationPage event collection and baseline submission', () => {

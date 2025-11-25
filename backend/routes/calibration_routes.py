@@ -81,9 +81,22 @@ def save_baseline():
             'mouse': m_stats
         }
         logging.info(f"[CALIBRATION] Consolidated baseline stats: {baseline_stats}")
-        fusion_mean = 0.5 
-        fusion_std = 0.1 
-        calculated_threshold = fusion_mean + (3 * fusion_std) 
+        # Example: Calculate fusion score mean/std from extracted stats
+        # Use keystroke and mouse stats if available, else fallback
+        # Aggregate means and stds from all feature stats
+        k_means = [v['mean'] for v in k_stats.values() if isinstance(v, dict) and 'mean' in v]
+        k_stds = [v['std'] for v in k_stats.values() if isinstance(v, dict) and 'std' in v]
+        m_means = [v['mean'] for v in m_stats.values() if isinstance(v, dict) and 'mean' in v]
+        m_stds = [v['std'] for v in m_stats.values() if isinstance(v, dict) and 'std' in v]
+        k_mean = np.mean(k_means) if k_means else 0
+        k_std = np.mean(k_stds) if k_stds else 1.0
+        m_mean = np.mean(m_means) if m_means else 0
+        m_std = np.mean(m_stds) if m_stds else 1.0
+        # Fusion mean: weighted average (same as fusion model)
+        fusion_mean = (0.5 * k_mean) + (0.5 * m_mean)
+        fusion_std = (0.5 * k_std) + (0.5 * m_std)
+        # Personalized threshold: mean + 2*std (stricter than before)
+        calculated_threshold = fusion_mean + (2 * fusion_std)
         logging.info(f"[CALIBRATION] Calculated personalized threshold: {calculated_threshold}")
         logging.info(f"[CALIBRATION] Saving baseline to Supabase for student_id: {student_id}, session_id: {session_id}")
         success = save_personalized_thresholds(

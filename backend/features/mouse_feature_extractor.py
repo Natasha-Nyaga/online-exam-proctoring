@@ -63,28 +63,26 @@ class MouseFeatureExtractor:
         Returns the feature vector ready for the ML model.
         """
         raw_features = self._calculate_features(events)
-        
         if baseline_stats is None:
             # --- CALIBRATION MODE: Calculate and return stats ---
-            stats = {}
-            for name in self.feature_names:
-                # Calculate mean and set std to 1.0 (to avoid division by zero later)
-                stats[name] = {'mean': raw_features.get(name, 0.0), 'std': 1.0} 
-            
+            feature_values = [raw_features[name] for name in self.feature_names]
+            m_mean = float(np.mean(feature_values))
+            m_std = float(np.std(feature_values))
+            simplified_stats = {
+                'mean': m_mean,
+                'std': m_std,
+                'detailed_stats': {name: {'mean': raw_features.get(name, 0.0), 'std': 1.0} for name in self.feature_names}
+            }
             feature_vector = [raw_features[name] for name in self.feature_names]
-            return feature_vector, stats
+            return feature_vector, simplified_stats
 
         # --- EXAM MODE: Normalize using provided baseline_stats ---
         normalized_features = []
-        
         for name in self.feature_names:
             value = raw_features.get(name, 0.0)
             stats = baseline_stats.get(name, {'mean': 0.0, 'std': 1.0})
             mean = stats['mean']
             std = stats['std']
-            
-            # Z-score normalization: (Value - Mean) / Std Dev
             normalized_value = (value - mean) / std if std > 0.0 else 0.0
             normalized_features.append(normalized_value)
-            
-        return normalized_features, None # Return only normalized features in exam mode
+        return normalized_features, None

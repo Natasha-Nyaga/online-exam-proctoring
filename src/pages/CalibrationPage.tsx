@@ -124,57 +124,6 @@ const CalibrationPage = () => {
         setAnswers((prev) => ({ ...prev, [questionId]: answer }));
     };
 
-    const saveBehavioralMetrics = async (questionIndex: number) => {
-        if (!sessionId) return;
-        const q = CALIBRATION_QUESTIONS[questionIndex];
-        const { data: { session } } = await supabase.auth.getSession();
-        const userId = session?.user?.id;
-
-        // Build payload according to table schema
-        if (q.type === "essay") {
-            const raw = keystrokeDynamics.keystrokeEvents.current || [];
-            const formattedRaw = raw.map(e => ({
-                key: e.key,
-                type: e.type,
-                timestamp: e.timestamp
-            }));
-            await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: String(sessionId),
-                student_id: String(userId),
-                metric_type: "keystroke",
-                question_type: "essay",
-                question_index: Number(questionIndex),
-                keystroke_count: formattedRaw.length,
-                metrics: {
-                    keystroke_vector: [],
-                    key_sequence: formattedRaw
-                }
-            });
-            keystrokeDynamics.resetMetrics();
-        } else {
-            const mouseMetrics = mouseDynamics.getCurrentMetrics();
-            const formattedMouse = mouseMetrics.cursorPositions.map(p => ({
-                x: p.x,
-                y: p.y,
-                t: p.t,
-                click: !!p.click
-            }));
-            await supabase.from("behavioral_metrics").insert({
-                calibration_session_id: String(sessionId),
-                student_id: String(userId),
-                metric_type: "mouse",
-                question_type: "mcq",
-                question_index: Number(questionIndex),
-                metrics: {
-                    mouse_vector: [],
-                    cursor_positions: formattedMouse,
-                    click_positions: formattedMouse.filter(p => p.click)
-                }
-            });
-            mouseDynamics.resetMetrics();
-        }
-    };
-
     // --- Single function to POST baseline to backend ---
     const postCalibrationBaseline = async () => {
         const { data: { session } } = await supabase.auth.getSession();
@@ -215,7 +164,6 @@ const CalibrationPage = () => {
                 student_id: studentId,
                 calibration_session_id: sessionId,
                 course_name: DEFAULT_COURSE_NAME,
-                threshold: DEFAULT_THRESHOLD,
                 keystroke_events: keystrokeEvents,
                 mouse_events: mouseEvents,
             };
@@ -224,7 +172,6 @@ const CalibrationPage = () => {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    // Add Authorization header if needed
                 },
                 body: JSON.stringify(payload),
             });
@@ -236,7 +183,6 @@ const CalibrationPage = () => {
     };
 
     const handleNext = async () => {
-        await saveBehavioralMetrics(currentQuestionIndex);
         setCurrentQuestionIndex(i => Math.min(i + 1, CALIBRATION_QUESTIONS.length - 1));
     };
 
@@ -247,9 +193,20 @@ const CalibrationPage = () => {
     };
 
     const handleSubmit = async () => {
-        if (!sessionId) return;
-        await saveBehavioralMetrics(currentQuestionIndex);
-        await supabase
+        if (!sessionId) {
+            toast({
+                title: "Error",
+                description: "Calibration session not initialized. Please refresh.",
+                className: "bg-destructive text-destructive-foreground"
+            });
+            return;
+        }
+
+        // 1. Post ALL accumulated raw data to the Flask server
+        await postCalibrationBaseline();
+
+        // 2. Update the Supabase session status to completed
+        const { error } = await supabase
             .from("calibration_sessions")
             .update({
                 status: "completed",
@@ -257,14 +214,26 @@ const CalibrationPage = () => {
             })
             .eq("id", sessionId);
 
-        // POST baseline to backend
-        await postCalibrationBaseline();
+        if (error) {
+            console.error("Supabase session update failed:", error);
+            toast({
+                title: "Database Error",
+                description: "Failed to mark calibration session as complete.",
+                className: "bg-destructive text-destructive-foreground"
+            });
+            return;
+        }
 
+        // 3. Final steps
         toast({
-            title: "Calibration complete",
-            description: "Your behavioral calibration data has been saved.",
-            className: "bg-success text-success-foreground"
+            title: "Calibration Complete! 🚀",
+            description: "Your behavioral baseline data has been submitted and saved.",
         });
+
+        // Reset dynamics after submission to clear the collected data
+        keystrokeDynamics.resetMetrics();
+        mouseDynamics.resetMetrics();
+
         if (examId) navigate(`/exam/${examId}`);
         else navigate("/student-dashboard");
     };

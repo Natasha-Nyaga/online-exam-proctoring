@@ -15,6 +15,9 @@ import { AlertCircle, Clock } from "lucide-react";
 const ANALYZE_BEHAVIOR_ENDPOINT = "http://localhost:5000/api/exam/analyze_behavior";
 const MONITORING_INTERVAL_MS = 10000; // 10 seconds
 
+// Replace with your actual Supabase project URL
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || "https://qoidbubsollxvsuyqcir.supabase.co";
+
 interface Question {
   id: string;
   question_text: string;
@@ -51,29 +54,57 @@ const ExamPage = () => {
   const handleSubmit = useCallback(async () => {
     if (!sessionId) return;
 
-    // Clear the anomaly monitoring interval to ensure no data is sent after submission
-    // (This requires the interval to be defined outside of this function scope or cleared 
-    // using a ref if necessary, but stopping the page navigation is usually enough.)
-
     try {
       // 1. Save all answers
       const answerInserts = Object.entries(answers).map(([questionId, answer]) => ({
         session_id: sessionId,
         question_id: questionId,
         answer_text: answer,
-        // Assuming your 'answers' table can handle upserts/inserts based on session_id + question_id
       }));
-
-      // NOTE: This insert needs to be robust (handle existing answers gracefully)
-      // A simple insert will fail if answers already exist. Consider a batch upsert or 'on conflict' logic.
-      await supabase.from("answers").upsert(answerInserts, { onConflict: 'session_id, question_id' });
-
+      console.log("[ExamPage] handleSubmit: answerInserts", answerInserts);
+      const upsertResult = await supabase.from("answers").upsert(answerInserts, { onConflict: 'session_id, question_id' });
+      console.log("[ExamPage] handleSubmit: upsertResult", upsertResult);
 
       // 2. Update session status
-      await supabase
+      const updateResult = await supabase
         .from("exam_sessions")
         .update({ status: "completed", completed_at: new Date().toISOString() })
         .eq("id", sessionId);
+      console.log("[ExamPage] handleSubmit: updateResult", updateResult);
+
+      if (updateResult.error) {
+        console.error("[ExamPage] Supabase session update failed:", updateResult.error);
+        toast({
+          title: "Database Error",
+          description: "Failed to mark exam session as complete.",
+          className: "bg-destructive text-destructive-foreground"
+        });
+        return;
+      }
+
+      // --- CRITICAL STEP: Call the Analysis Endpoint ---
+      try {
+        const analysisPayload = {
+          student_id: studentId,
+          exam_session_id: sessionId,
+          calibration_session_id: localStorage.getItem('CALIB_SESSION_ID'),
+          mouse_events: [...mouseBuffer.current],
+          keystroke_events: [...keyBuffer.current],
+          start_timestamp: Number(lastSubmissionTime.current),
+          end_timestamp: Date.now(),
+        };
+        console.log('[ExamPage] Analysis Payload:', analysisPayload);
+        const analysisResponse = await fetch('http://127.0.0.1:5000/api/exam/analyze_behavior', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(analysisPayload),
+        });
+        const analysisResult = await analysisResponse.json();
+        console.log('[Analysis] Prediction Result:', analysisResult);
+        // TODO: Handle the prediction result (e.g., display a warning, update state)
+      } catch (error) {
+        console.error('[Analysis] Failed to run behavioral analysis:', error);
+      }
 
       toast({
         title: "Exam submitted!",
@@ -83,7 +114,7 @@ const ExamPage = () => {
 
       navigate("/exam-complete");
     } catch (error) {
-      console.error("Submission Error:", error);
+      console.error("[ExamPage] Submission Error:", error);
       toast({
         title: "Error",
         description: "Failed to submit exam",
@@ -95,38 +126,52 @@ const ExamPage = () => {
   // --- Exam Initialization (Runs once) ---
   useEffect(() => {
     const initializeExam = async () => {
-      const { data: userData } = await supabase.auth.getUser();
       const { data: { session } } = await supabase.auth.getSession();
-      if (!session || !userData?.user?.id) {
+      if (!session) {
         navigate("/student-login");
         return;
       }
-      const currentStudentId = userData.user.id;
-      setStudentId(currentStudentId);
+      // 1. Get student ID from auth and set state
+      const studentIdFromAuth = session.user.id;
+      setStudentId(studentIdFromAuth);
+      const accessToken = session.access_token;
+      // 2. Use the correct studentId for queries
+      const existingSessionResponse = await fetch(
+        `${SUPABASE_URL}/rest/v1/exam_sessions?exam_id=eq.${examId}&student_id=eq.${studentIdFromAuth}&status=eq.in_progress&select=*`,
+        {
+          headers: {
+            apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+            Authorization: `Bearer ${accessToken}`,
+            Accept: 'application/json',
+          },
+        }
+      );
+      const existingSessionData = await existingSessionResponse.json();
 
-      // 1. Check for existing paused session (and get exam details)
-      const [{ data: existingSession }, { data: examData }] = await Promise.all([
-        supabase.from("exam_sessions").select("*").eq("exam_id", examId).eq("student_id", currentStudentId).eq("status", "in_progress").single(),
-        supabase.from("exams").select("title, duration_minutes").eq("id", examId).single(),
-      ]);
+      const { data: { title, duration_minutes } } = await supabase
+        .from("exams")
+        .select("title, duration_minutes")
+        .eq("id", examId)
+        .single();
 
-      if (!examData) {
+      if (!title) {
         setLoading(false);
         toast({ title: "Error", description: "Exam not found.", variant: "destructive" });
         return;
       }
 
-      setExamTitle(examData.title);
+      setExamTitle(title);
 
       let currentSessionId: string | null = null;
-      let initialTimeLeft = examData.duration_minutes * 60;
+      let initialTimeLeft = duration_minutes * 60;
 
       // Calculate remaining time if resuming
-      if (existingSession) {
+      if (existingSessionData && existingSessionData.length > 0) {
+        const existingSession = existingSessionData[0];
         const elapsedSeconds = Math.floor(
           (Date.now() - new Date(existingSession.started_at).getTime()) / 1000
         );
-        initialTimeLeft = Math.max(0, (examData.duration_minutes * 60) - elapsedSeconds);
+        initialTimeLeft = Math.max(0, (duration_minutes * 60) - elapsedSeconds);
         currentSessionId = existingSession.id;
         
         // Load previous answers
@@ -149,7 +194,7 @@ const ExamPage = () => {
           .from("exam_sessions")
           .insert({
             exam_id: examId,
-            student_id: currentStudentId,
+            student_id: studentIdFromAuth,
             status: "in_progress",
           })
           .select()
@@ -162,7 +207,7 @@ const ExamPage = () => {
 
       setSessionId(currentSessionId);
       setTimeLeft(initialTimeLeft);
-      
+
       // Get questions
       const { data: questionsData } = await supabase
         .from("questions")
@@ -272,64 +317,45 @@ const ExamPage = () => {
     };
   }, []);
 
-  // --- Data Sender Interval ---
-  useEffect(() => {
+  // --- Function to POST exam behavior to Flask backend ---
+  const postExamBehavior = async () => {
     if (!sessionId || !studentId) return;
-
-    const sendBiometrics = async () => {
-      if (mouseBuffer.current.length === 0 && keyBuffer.current.length === 0) return;
-
-      const currentTime = Date.now();
-      
-      const payload = {
+    const payload = {
         student_id: String(studentId),
         exam_id: String(examId),
         exam_session_id: String(sessionId),
         start_timestamp: Number(lastSubmissionTime.current),
-        end_timestamp: Number(currentTime),
+        end_timestamp: Date.now(),
         mouse_events: [...mouseBuffer.current],
         keystroke_events: [...keyBuffer.current],
-        // NOTE: Video score would be added here if you implemented video analytics
-        // video_score: [latest_video_analysis_score]
-      };
-
-      // Clear buffers and update last submission time immediately
-      mouseBuffer.current = [];
-      keyBuffer.current = [];
-      lastSubmissionTime.current = currentTime;
-
-      try {
-        const response = await fetch(ANALYZE_BEHAVIOR_ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        /*...*/
-        const data = await response.json();
-        console.log("AI Analysis:", data);
-
-        // Check for high anomaly score from the Fusion Model
-        if (data.analysis?.fusion_risk_score > 0.7) { // Assuming risk score is 0 to 1
-            setIsAlerted(true); // Set state to show a visual warning to the student/admin
-            toast({
-              title: "Security Alert!",
-              description: "Suspicious behavior detected. Your session is being closely monitored.",
-              className: "bg-error text-error-foreground",
-              duration: 5000,
-            });
-        }
-
-      } catch (error) {
-        console.error("Error sending biometrics:", error);
-      }
+        // Add other metadata if needed
     };
+    try {
+        console.log('[ExamPage] Exam behavior POST payload:', payload);
+        const response = await fetch('http://127.0.0.1:5000/api/exam/analyze_behavior', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        console.log('[ExamPage] Exam behavior POST result:', result);
+    } catch (err) {
+        console.error('[ExamPage] Exam behavior POST error:', err);
+    }
+  };
 
+  // --- Data Sender Interval ---
+  useEffect(() => {
+    if (!sessionId || !studentId) return;
+    const sendBiometrics = async () => {
+        if (mouseBuffer.current.length === 0 && keyBuffer.current.length === 0) return;
+        await postExamBehavior();
+        // Clear buffers and update last submission time immediately
+        mouseBuffer.current = [];
+        keyBuffer.current = [];
+        lastSubmissionTime.current = Date.now();
+    };
     const interval = setInterval(sendBiometrics, MONITORING_INTERVAL_MS);
-
     return () => clearInterval(interval);
   }, [sessionId, studentId, examId, toast]);
 

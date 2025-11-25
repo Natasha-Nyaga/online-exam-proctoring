@@ -110,32 +110,38 @@ class KeystrokeFeatureExtractor:
         Main function to extract features. Normalizes them if baseline_stats are provided.
         Returns a list of features (ready for ML model) and, if in calibration, the calculated statistics.
         """
+        # --- CRITICAL FIX: Graceful handling of empty input ---
+        if not events or len(events) < 2:
+            feature_vector = [0.0] * len(self.feature_names)
+            simplified_stats = {
+                'mean': 0.0,
+                'std': 1.0,
+                'detailed_stats': {name: {'mean': 0.0, 'std': 1.0} for name in self.feature_names}
+            }
+            return feature_vector, simplified_stats
+        # --- END CRITICAL FIX ---
+
         raw_features = self._calculate_features(events)
-        
         # If no baseline_stats are provided (Calibration Phase)
         if baseline_stats is None:
-            # Calculate mean and standard deviation for the calibration block
-            stats = {}
-            for name in self.feature_names:
-                # Assuming the single block's value is the mean, and using a default std (1.0)
-                stats[name] = {'mean': raw_features.get(name, 0.0), 'std': 1.0} 
-            
-            # Return feature values in order and the calculated stats
+            feature_values = [raw_features[name] for name in self.feature_names]
+            k_mean = float(np.mean(feature_values))
+            k_std = float(np.std(feature_values))
+            simplified_stats = {
+                'mean': k_mean,
+                'std': k_std,
+                'detailed_stats': {name: {'mean': raw_features.get(name, 0.0), 'std': 1.0} for name in self.feature_names}
+            }
             feature_vector = [raw_features[name] for name in self.feature_names]
-            return feature_vector, stats
+            return feature_vector, simplified_stats
 
         # If baseline_stats are provided (Exam Monitoring Phase)
         normalized_features = []
-        
         for name in self.feature_names:
             value = raw_features.get(name, 0.0)
-            # Retrieve the student's personalized mean/std for this feature
             stats = baseline_stats.get(name, {'mean': 0.0, 'std': 1.0})
             mean = stats['mean']
             std = stats['std']
-            
-            # Apply Z-score normalization using the student's personalized baseline stats
             normalized_value = (value - mean) / std if std > 0.0 else 0.0
             normalized_features.append(normalized_value)
-            
         return normalized_features, None
