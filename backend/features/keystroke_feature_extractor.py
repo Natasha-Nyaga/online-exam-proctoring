@@ -1,3 +1,7 @@
+import numpy as np
+import pandas as pd
+from typing import List, Dict, Union, Tuple
+
 def stable_z_score(measurement, mean, std, epsilon=1e-6):
     """
     Returns a stable Z-score for a measurement given mean and std,
@@ -5,17 +9,13 @@ def stable_z_score(measurement, mean, std, epsilon=1e-6):
     """
     return (measurement - mean) / (std + epsilon)
 
-import numpy as np
-import pandas as pd
-from typing import List, Dict, Union, Tuple
-
 class KeystrokeFeatureExtractor:
     """
     Extracts dwell times and flight times for keystroke dynamics based on the provided logic.
     The feature names match the public.behavioral_metrics table schema.
     """
     def __init__(self):
-        # Feature names must be snake_case to match the database columns (e.g., mean_du_key1_key1)
+        # Feature names must be snake_case to match the database columns
         self.feature_names = [
             'mean_du_key1_key1', 
             'mean_dd_key1_key2', 
@@ -45,7 +45,6 @@ class KeystrokeFeatureExtractor:
             'keystroke_count': 'keystroke_count'
         }
 
-
     def _calculate_features(self, raw_events: List[Dict]) -> Dict[str, float]:
         """
         Calculates raw features from a list of key events using the user's pandas logic.
@@ -65,20 +64,18 @@ class KeystrokeFeatureExtractor:
         hold_times = []
         min_len = min(len(presses), len(releases))
         if min_len > 0:
-            # Approximate hold times by subtracting corresponding release from press
             hold_times = (releases['timestamp'][:min_len] - presses['timestamp'][:min_len])
 
         # --- 2. Digraph Latencies (key1.key2) ---
-        dd_list = [] # Down-Down: Press(i+1) - Press(i)
-        ud_list = [] # Up-Down: Press(i+1) - Release(i)
-        uu_list = [] # Up-Up: Release(i+1) - Release(i)
-        du_list = [] # Down-Up (Transition): Release(i+1) - Press(i)
+        dd_list = []
+        ud_list = []
+        uu_list = []
+        du_list = []
 
         for i in range(len(presses) - 1):
             p1 = presses.iloc[i]['timestamp']
             p2 = presses.iloc[i+1]['timestamp']
             
-            # We need corresponding releases for UD/UU
             if i < len(releases) - 1:
                 r1 = releases.iloc[i]['timestamp']
                 r2 = releases.iloc[i+1]['timestamp']
@@ -89,7 +86,6 @@ class KeystrokeFeatureExtractor:
                 du_list.append(r2 - p1)
 
         # --- 3. CONSTRUCT FEATURES ---
-        # Initialize dictionary to hold raw calculated features
         raw_calculated_features = {
             'mean_DU.key1.key1': np.mean(hold_times) if len(hold_times) > 0 else 0.0,
             'std_DU.key1.key1': np.std(hold_times) if len(hold_times) > 0 else 0.0,
@@ -111,13 +107,11 @@ class KeystrokeFeatureExtractor:
             
         return standardized_features
 
-
     def extract_features(self, events: List[Dict], baseline_stats: Union[Dict, None] = None) -> Tuple[List[float], Union[Dict, None]]:
         """
         Main function to extract features. Normalizes them if baseline_stats are provided.
         Returns a list of features (ready for ML model) and, if in calibration, the calculated statistics.
         """
-        # --- CRITICAL FIX: Graceful handling of empty input ---
         if not events or len(events) < 2:
             feature_vector = [0.0] * len(self.feature_names)
             simplified_stats = {
@@ -126,9 +120,9 @@ class KeystrokeFeatureExtractor:
                 'detailed_stats': {name: {'mean': 0.0, 'std': 1.0} for name in self.feature_names}
             }
             return feature_vector, simplified_stats
-        # --- END CRITICAL FIX ---
 
         raw_features = self._calculate_features(events)
+        
         # If no baseline_stats are provided (Calibration Phase)
         if baseline_stats is None:
             feature_values = [raw_features[name] for name in self.feature_names]
@@ -152,3 +146,35 @@ class KeystrokeFeatureExtractor:
             normalized_value = stable_z_score(value, mean, std)
             normalized_features.append(normalized_value)
         return normalized_features, None
+
+    def extract_features_all(self, all_events: List[Dict]) -> Tuple[List[List[float]], Dict]:
+        """
+        NEW METHOD: Processes all calibration events and returns multiple feature vectors.
+        Used during calibration to create baseline statistics.
+        
+        Returns:
+            - List of feature vectors (one per segment/question)
+            - Aggregated statistics across all segments
+        """
+        if not all_events or len(all_events) < 2:
+            return [], {
+                'mean': 0.0,
+                'std': 1.0,
+                'detailed_stats': {name: {'mean': 0.0, 'std': 1.0} for name in self.feature_names}
+            }
+        
+        # Extract raw features from all events as one segment
+        raw_features = self._calculate_features(all_events)
+        feature_vector = [raw_features[name] for name in self.feature_names]
+        
+        # Calculate overall statistics
+        k_mean = float(np.mean(feature_vector))
+        k_std = float(np.std(feature_vector)) if len(feature_vector) > 1 else 1.0
+        
+        simplified_stats = {
+            'mean': k_mean,
+            'std': k_std,
+            'detailed_stats': {name: {'mean': raw_features[name], 'std': 1.0} for name in self.feature_names}
+        }
+        
+        return [feature_vector], simplified_stats
