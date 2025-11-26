@@ -36,7 +36,7 @@ MOUSE_FEATURES = [
 def analyze_behavior():
     """
     Real-time behavior analysis during exam.
-    Normalizes features using personalized baseline and compares against personalized threshold.
+    Compares current raw features against baseline using ML models.
     """
     data = request.get_json()
     
@@ -78,98 +78,111 @@ def analyze_behavior():
             print(f"[ERROR] Baseline data corrupted: {e}")
             return jsonify({"error": "Baseline data incomplete"}), 500
 
-        # === STEP 2: Extract Raw Features ===
-        k_features_raw, _ = KEYSTROKE_FE.extract_features(key_events, baseline_stats=None)
-        m_features_raw, _ = MOUSE_FE.extract_features(mouse_events, baseline_stats=None)
+        # === STEP 2: Extract CURRENT Raw Features ===
+        print("\n[STEP 2] Extracting current raw features...")
+        k_features_current, _ = KEYSTROKE_FE.extract_features(key_events, baseline_stats=None)
+        m_features_current, _ = MOUSE_FE.extract_features(mouse_events, baseline_stats=None)
 
-        print(f"[FEATURES] Raw keystroke features: {k_features_raw[:5]}...")
-        print(f"[FEATURES] Raw mouse features: {m_features_raw}")
+        print(f"[FEATURES] Current keystroke features: {[f'{v:.2f}' for v in k_features_current[:5]]}")
+        print(f"[FEATURES] Current mouse features: {[f'{v:.2f}' for v in m_features_current]}")
 
-        # Initialize session history if needed
-        if exam_session_id not in SESSION_FEATURE_HISTORY:
-            SESSION_FEATURE_HISTORY[exam_session_id] = {'keystroke': [], 'mouse': []}
-
-        # Convert to dict format for storage
-        if isinstance(k_features_raw, list):
-            k_features_dict = dict(zip(KEYSTROKE_FEATURES, k_features_raw))
-        else:
-            k_features_dict = k_features_raw
-
-        if isinstance(m_features_raw, list):
-            m_features_dict = dict(zip(MOUSE_FEATURES, m_features_raw))
-        else:
-            m_features_dict = m_features_raw
-
-        SESSION_FEATURE_HISTORY[exam_session_id]['keystroke'].append(k_features_dict)
-        SESSION_FEATURE_HISTORY[exam_session_id]['mouse'].append(m_features_dict)
-
-        # Check if we have enough data
-        if len(SESSION_FEATURE_HISTORY[exam_session_id]['keystroke']) < 2:
+        # Check for sufficient data
+        if len(key_events) < 5:
+            print("[WARNING] Insufficient keystroke data")
             return jsonify({
                 "status": "gathering_data",
                 "risk_score": 0.0,
-                "message": "Collecting initial data..."
+                "message": "Collecting more keystroke data..."
             }), 200
 
-        # === STEP 3: Normalize Features Using Personalized Baseline ===
-        k_normalized = []
+        # === STEP 3: Calculate Deviation from Baseline ===
+        print("\n[STEP 3] Calculating deviations from baseline...")
+        
+        # For each feature, calculate how much current differs from baseline
+        k_deviations = []
         for i, feat_name in enumerate(KEYSTROKE_FEATURES):
-            raw_val = k_features_raw[i] if isinstance(k_features_raw, list) else k_features_dict.get(feat_name, 0.0)
+            current_val = k_features_current[i]
+            baseline_mean = k_detailed_stats[feat_name]['mean']
             
-            # Get baseline mean/std for this feature
-            feat_stats = k_detailed_stats.get(feat_name, {'mean': 0.0, 'std': 1.0})
-            mean = feat_stats['mean']
-            std = max(feat_stats['std'], EPSILON)  # Ensure non-zero
+            # Calculate percentage deviation
+            if baseline_mean != 0:
+                deviation_pct = abs(current_val - baseline_mean) / abs(baseline_mean)
+            else:
+                deviation_pct = 0.0 if current_val == 0 else 1.0
             
-            # Z-score normalization with clipping
-            normalized = (raw_val - mean) / std
-            normalized = np.clip(normalized, -MAX_Z_SCORE_CLIP, MAX_Z_SCORE_CLIP)
-            k_normalized.append(normalized)
+            k_deviations.append(deviation_pct)
+            
+            if i < 3:  # Log first 3 features
+                print(f"[DEVIATION] {feat_name}: baseline={baseline_mean:.2f}, current={current_val:.2f}, deviation={deviation_pct:.2%}")
 
-        m_normalized = []
+        m_deviations = []
         for i, feat_name in enumerate(MOUSE_FEATURES):
-            raw_val = m_features_raw[i] if isinstance(m_features_raw, list) else m_features_dict.get(feat_name, 0.0)
+            current_val = m_features_current[i]
+            baseline_mean = m_detailed_stats[feat_name]['mean']
             
-            feat_stats = m_detailed_stats.get(feat_name, {'mean': 0.0, 'std': 1.0})
-            mean = feat_stats['mean']
-            std = max(feat_stats['std'], EPSILON)
+            if baseline_mean != 0:
+                deviation_pct = abs(current_val - baseline_mean) / abs(baseline_mean)
+            else:
+                deviation_pct = 0.0 if current_val == 0 else 1.0
             
-            normalized = (raw_val - mean) / std
-            normalized = np.clip(normalized, -MAX_Z_SCORE_CLIP, MAX_Z_SCORE_CLIP)
-            m_normalized.append(normalized)
+            m_deviations.append(deviation_pct)
+            print(f"[DEVIATION] {feat_name}: baseline={baseline_mean:.2f}, current={current_val:.2f}, deviation={deviation_pct:.2%}")
 
-        print(f"[NORMALIZED] Keystroke Z-scores (first 5): {k_normalized[:5]}")
-        print(f"[NORMALIZED] Mouse Z-scores: {m_normalized}")
+        avg_k_deviation = np.mean(k_deviations)
+        avg_m_deviation = np.mean(m_deviations)
+        print(f"[DEVIATION] Avg keystroke deviation: {avg_k_deviation:.2%}")
+        print(f"[DEVIATION] Avg mouse deviation: {avg_m_deviation:.2%}")
 
-        # === STEP 4: ML Model Predictions ===
-        k_input = pd.DataFrame([k_normalized], columns=KEYSTROKE_FEATURES)
-        m_input = pd.DataFrame([m_normalized], columns=MOUSE_FEATURES)
+        # === STEP 4: ML Model Predictions on RAW Features ===
+        print("\n[STEP 4] Running ML models on current features...")
+        
+        # Create input DataFrames with RAW features
+        k_input = pd.DataFrame([k_features_current], columns=KEYSTROKE_FEATURES)
+        m_input = pd.DataFrame([m_features_current], columns=MOUSE_FEATURES)
 
-        # Keystroke model (XGBoost) - probability of anomaly
+        print(f"[MODELS] Keystroke input shape: {k_input.shape}")
+        print(f"[MODELS] Mouse input shape: {m_input.shape}")
+
+        # Keystroke model prediction
         try:
-            k_score = float(keystroke_model.predict_proba(k_input)[0, 1])
+            k_proba = keystroke_model.predict_proba(k_input)
+            k_score = float(k_proba[0, 1])  # Probability of anomaly
+            print(f"[MODELS] ✓ Keystroke anomaly score: {k_score:.6f}")
         except Exception as e:
             print(f"[ERROR] Keystroke model failed: {e}")
             k_score = 0.0
 
-        # Mouse model (SVM) - decision function or probability
+        # Mouse model prediction
         try:
-            m_decision = float(mouse_model.decision_function(m_input)[0])
-            # Convert decision to anomaly score (more negative = more normal)
-            m_score = max(0.0, -m_decision)
+            # Try decision_function first
+            m_decision = mouse_model.decision_function(m_input)
+            # Convert to probability-like score using sigmoid
+            m_score = float(1.0 / (1.0 + np.exp(-m_decision[0])))
+            print(f"[MODELS] Mouse decision: {m_decision[0]:.6f}")
+            print(f"[MODELS] ✓ Mouse anomaly score: {m_score:.6f}")
         except AttributeError:
             # Fallback to predict_proba
             try:
-                m_score = float(mouse_model.predict_proba(m_input)[0, 1])
+                m_proba = mouse_model.predict_proba(m_input)
+                m_score = float(m_proba[0, 1])
+                print(f"[MODELS] ✓ Mouse anomaly score: {m_score:.6f}")
             except Exception as e:
                 print(f"[ERROR] Mouse model failed: {e}")
                 m_score = 0.0
 
-        print(f"[MODEL SCORES] Keystroke: {k_score:.4f}, Mouse: {m_score:.4f}")
-
         # === STEP 5: Fusion Score Calculation ===
+        print("\n[STEP 5] Calculating fusion risk score...")
+        
+        # Weighted average (can adjust weights based on feature reliability)
         fusion_score = (0.5 * k_score) + (0.5 * m_score)
         
+        # Apply deviation boost if deviations are very high
+        if avg_k_deviation > 0.5 or avg_m_deviation > 0.5:
+            print(f"[FUSION] High deviation detected, applying boost")
+            fusion_score = min(1.0, fusion_score * 1.2)
+        
+        print(f"[FUSION] Keystroke score: {k_score:.4f}")
+        print(f"[FUSION] Mouse score: {m_score:.4f}")
         print(f"[FUSION] Combined risk score: {fusion_score:.4f}")
         print(f"[FUSION] Personalized threshold: {personalized_threshold:.4f}")
         print(f"[FUSION] Threshold exceeded: {fusion_score >= personalized_threshold}")
@@ -177,13 +190,18 @@ def analyze_behavior():
         # === STEP 6: Incident Logging ===
         incident_logged = False
         if fusion_score >= personalized_threshold:
+            print(f"\n[ALERT] ⚠️⚠️⚠️ ANOMALY DETECTED ⚠️⚠️⚠️")
+            print(f"[ALERT] Risk score ({fusion_score:.4f}) exceeds threshold ({personalized_threshold:.4f})")
+            
             incident_details = {
                 "keystroke_score": k_score,
                 "mouse_score": m_score,
                 "fusion_score": fusion_score,
                 "threshold": personalized_threshold,
                 "timestamp": data.get('end_timestamp'),
-                "exceeded_by": fusion_score - personalized_threshold
+                "exceeded_by": fusion_score - personalized_threshold,
+                "avg_keystroke_deviation": avg_k_deviation,
+                "avg_mouse_deviation": avg_m_deviation
             }
             
             incident_logged = save_anomaly_record(
@@ -193,7 +211,9 @@ def analyze_behavior():
             )
             
             if incident_logged:
-                print(f"[INCIDENT] ⚠️ Anomaly logged! Score: {fusion_score:.4f}")
+                print(f"[INCIDENT] ✓ Anomaly logged to database")
+        else:
+            print(f"\n[STATUS] ✓ Behavior normal (score below threshold)")
 
         # === STEP 7: Count Total Incidents ===
         from utils.db_helpers import supabase
@@ -209,7 +229,7 @@ def analyze_behavior():
         except Exception as e:
             print(f"[ERROR] Failed to count incidents: {e}")
 
-        print(f"[SUMMARY] Total incidents for session: {incident_count}")
+        print(f"[SUMMARY] Total incidents for this session: {incident_count}")
         print(f"{'='*60}\n")
 
         # === STEP 8: Return Analysis Results ===
@@ -223,7 +243,9 @@ def analyze_behavior():
                 "threshold_exceeded": fusion_score >= personalized_threshold,
                 "incident_logged": incident_logged,
                 "cheating_incident_count": incident_count,
-                "severity": "high" if fusion_score >= 0.8 else "medium" if fusion_score >= 0.6 else "low"
+                "severity": "high" if fusion_score >= 0.8 else "medium" if fusion_score >= 0.6 else "low",
+                "avg_keystroke_deviation": float(avg_k_deviation),
+                "avg_mouse_deviation": float(avg_m_deviation)
             }
         }), 200
 
