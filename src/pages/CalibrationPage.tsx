@@ -12,9 +12,6 @@ import { useToast } from "@/hooks/use-toast";
 import { AlertCircle, Clock } from "lucide-react";
 import { useKeystrokeDynamics } from "@/hooks/useKeystrokeDynamics";
 import { useMouseDynamics } from "@/hooks/useMouseDynamics";
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "@/config";
-
-// --- Configuration and Data Definitions ---
 
 interface CalibrationQuestion {
     id: number;
@@ -24,46 +21,26 @@ interface CalibrationQuestion {
 }
 
 const CALIBRATION_QUESTIONS: CalibrationQuestion[] = [
-{ id: 1, type: "essay", text: "Describe your typical study routine and how you prepare for exams. Include details about your study environment, time management, and preferred learning methods." },
-
-{ id: 2, type: "essay", text: "What are your academic goals for this course? Explain what you hope to learn and how you plan to achieve these goals." },
-
-{ id: 3, type: "essay", text: "Reflect on a challenging academic experience you've faced and how you overcame it. What did you learn from this experience?" },
-
-{ id: 4, type: "essay", text: "Explain how you manage distractions while studying or taking online exams. What strategies help you stay focused?" },
-
-{ id: 5, type: "essay", text: "Describe your ideal learning environment and how it influences your performance in online or in-person classes." },
-
-{ id: 6, type: "essay", text: "Discuss how you usually prepare for high-pressure academic tasks. How do you manage stress and maintain productivity?" },
-
-{ id: 7, type: "essay", text: "Explain a study technique or learning method that has significantly improved your academic performance. Why does it work for you?" },
-
-{ id: 8, type: "essay", text: "Describe how you balance academic responsibilities with other commitments such as work, family, or extracurricular activities." },
-
-{ id: 9, type: "essay", text: "In your own words, explain what motivates you to perform well academically. How do you stay motivated throughout the semester?" },
-
-{ id: 10, type: "essay", text: "Reflect on a time when you had to learn a difficult concept. How did you approach it, and what steps did you take to fully understand it?" }
+    { id: 1, type: "essay", text: "Describe your typical study routine and how you prepare for exams. Include details about your study environment, time management, and preferred learning methods." },
+    { id: 2, type: "essay", text: "What are your academic goals for this course? Explain what you hope to learn and how you plan to achieve these goals." },
+    { id: 3, type: "essay", text: "Reflect on a challenging academic experience you've faced and how you overcame it. What did you learn from this experience?" },
+    { id: 4, type: "essay", text: "Explain how you manage distractions while studying or taking online exams. What strategies help you stay focused?" },
+    { id: 5, type: "essay", text: "Describe your ideal learning environment and how it influences your performance in online or in-person classes." },
+    { id: 6, type: "essay", text: "Discuss how you usually prepare for high-pressure academic tasks. How do you manage stress and maintain productivity?" },
+    { id: 7, type: "essay", text: "Explain a study technique or learning method that has significantly improved your academic performance. Why does it work for you?" },
+    { id: 8, type: "essay", text: "Describe how you balance academic responsibilities with other commitments such as work, family, or extracurricular activities." },
+    { id: 9, type: "essay", text: "In your own words, explain what motivates you to perform well academically. How do you stay motivated throughout the semester?" },
+    { id: 10, type: "essay", text: "Reflect on a time when you had to learn a difficult concept. How did you approach it, and what steps did you take to fully understand it?" }
 ];
 
-const CALIBRATION_DURATION = 10 * 60;
-const DEFAULT_COURSE_NAME = "General";
-const DEFAULT_THRESHOLD = 0.8;
-
-export interface CursorPos {
-    type: string;
-    timestamp: number;
-    x: number;
-    y: number;
-}
+const CALIBRATION_DURATION = 10 * 60; // 10 minutes
 
 const CalibrationPage = () => {
-
     const keystrokeDynamics = useKeystrokeDynamics();
     const mouseDynamics = useMouseDynamics();
 
-    // --- Global  Listeners for Behavioral Events ---
+    // Global Mouse Event Listeners
     useEffect(() => {
-        // Mouse event handler (captures move, copy, cut, paste, dblclick)
         const handleMouseEvent = (type: string, e: MouseEvent | Event) => {
             const mouseEvent = e as MouseEvent;
             if (mouseDynamics.cursorPositions && mouseDynamics.cursorPositions.current) {
@@ -71,14 +48,14 @@ const CalibrationPage = () => {
                     type,
                     timestamp: Date.now(),
                     x: mouseEvent.clientX || 0,
-                    y: mouseEvent.clientY || 0
+                    y: mouseEvent.clientY || 0,
+                    // tab: document.hidden ? 'inactive' : 'active'
                 });
             }
         };
 
-        // Tab Visibility Change handler (for 'focus'/'blur' behavior)
         const onVisibilityChange = () => {
-            handleMouseEvent(document.hidden ? 'blur' : 'focus', new Event(''));
+            handleMouseEvent(document.hidden ? 'blur' : 'focus', new Event('visibilitychange'));
         };
 
         window.addEventListener('mousemove', (e) => handleMouseEvent('move', e));
@@ -88,16 +65,34 @@ const CalibrationPage = () => {
         window.addEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
         document.addEventListener('visibilitychange', onVisibilityChange);
 
-        // Cleanup
         return () => {
             window.removeEventListener('mousemove', (e) => handleMouseEvent('move', e));
             window.removeEventListener('copy', (e) => handleMouseEvent('copy', e));
             window.removeEventListener('cut', (e) => handleMouseEvent('cut', e));
-            window.removeEventListener('paste', (e) => handleMouseEvent('paste', e));
+            window.addEventListener('paste', (e) => handleMouseEvent('paste', e));
             window.removeEventListener('dblclick', (e) => handleMouseEvent('dblclick', e));
             document.removeEventListener('visibilitychange', onVisibilityChange);
         };
     }, [mouseDynamics]);
+
+    // Global Keystroke Listeners
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            keystrokeDynamics.handleKeyDown(e);
+        };
+
+        const handleKeyUp = (e: KeyboardEvent) => {
+            keystrokeDynamics.handleKeyUp(e);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('keyup', handleKeyUp);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('keyup', handleKeyUp);
+        };
+    }, [keystrokeDynamics]);
 
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -110,11 +105,14 @@ const CalibrationPage = () => {
     const [timeLeft, setTimeLeft] = useState(CALIBRATION_DURATION);
     const [loading, setLoading] = useState(true);
 
+    // Debug logging
     useEffect(() => {
         const interval = setInterval(() => {
-            console.log("[Calibration Debug] Keystroke:", keystrokeDynamics.getCurrentMetrics());
-            console.log("[Calibration Debug] Mouse:", mouseDynamics.getCurrentMetrics());
-        }, 3000);
+            const kMetrics = keystrokeDynamics.getCurrentMetrics();
+            const mMetrics = mouseDynamics.getCurrentMetrics();
+            console.log("[Calibration Debug] Keystroke events:", kMetrics.totalEvents);
+            console.log("[Calibration Debug] Mouse events:", mMetrics.cursorPositions.length);
+        }, 5000);
         return () => clearInterval(interval);
     }, [keystrokeDynamics, mouseDynamics]);
 
@@ -126,22 +124,6 @@ const CalibrationPage = () => {
                 return;
             }
 
-            // Optional: Check for existing exam session (not strictly required)
-            try {
-                const studentId = session.user.id;
-                const { data: { session: authSession } } = await supabase.auth.getSession();
-                const accessToken = authSession?.access_token;
-                await fetch(`${SUPABASE_URL}/rest/v1/exam_sessions?exam_id=eq.${examId}&student_id=eq.${studentId}&status=eq.in_progress&select=*`, {
-                    headers: {
-                        apikey: SUPABASE_ANON_KEY,
-                        Authorization: `Bearer ${accessToken}`,
-                    },
-                });
-            } catch (err) {
-                console.warn("[CalibrationPage] Ignoring exam_sessions fetch error:", err);
-            }
-
-            // Create a new calibration session record
             const { data: sessionData } = await supabase
                 .from("calibration_sessions")
                 .insert({
@@ -155,7 +137,7 @@ const CalibrationPage = () => {
                 setSessionId(sessionData.id);
             }
 
-            console.log("[CalibrationPage] Calibration session started for student:", session?.user?.id);
+            console.log("[CalibrationPage] Session started:", session?.user?.id);
             setLoading(false);
         };
         initializeCalibration();
@@ -182,50 +164,49 @@ const CalibrationPage = () => {
         setAnswers((prev) => ({ ...prev, [questionId]: answer }));
     };
 
-    // --- Single function to POST baseline to backend ---
     const postCalibrationBaseline = async () => {
         const { data: { session } } = await supabase.auth.getSession();
         const studentId = session?.user?.id;
         if (!studentId || !sessionId) return;
 
-        // Collect all raw events from your hooks
-        const keystrokeEvents = keystrokeDynamics.keystrokeEvents.current || [];
-        const mouseEvents = mouseDynamics.cursorPositions.current || [];
+        const keystrokeEvents: import("@/hooks/useKeystrokeDynamics").KeystrokeEvent[] = keystrokeDynamics.keystrokeEvents.current || [];
+        const mouseEvents: import("@/hooks/useMouseDynamics").CursorPos[] = mouseDynamics.cursorPositions.current || [];
+
+        console.log("\n" + "=".repeat(60));
+        console.log("[Calibration] Submitting baseline data");
+        console.log(`[Calibration] Keystroke events: ${keystrokeEvents.length}`);
+        console.log(`[Calibration] Mouse events: ${mouseEvents.length}`);
+        console.log("=".repeat(60) + "\n");
 
         if (!keystrokeEvents.length && !mouseEvents.length) {
             toast({
                 title: "Calibration Error",
-                description: "No keystroke or mouse events recorded. Please interact with the calibration questions before submitting.",
-                className: "bg-destructive text-destructive-foreground"
+                description: "No behavioral data recorded. Please interact with the questions.",
+                variant: "destructive"
             });
-            console.warn("[Calibration] No keystroke or mouse events to submit as baseline.");
+            console.error("[Calibration] No events to submit");
             return;
         }
+
         if (!keystrokeEvents.length) {
             toast({
-                title: "Calibration Warning",
-                description: "No keystroke events recorded. Only mouse events will be used for baseline.",
-                className: "bg-warning text-warning-foreground"
+                title: "Warning",
+                description: "No keystroke data recorded. Calibration may be incomplete.",
+                variant: "destructive"
             });
-            console.warn("[Calibration] No keystroke events recorded.");
         }
-        if (!mouseEvents.length) {
-            toast({
-                title: "Calibration Warning",
-                description: "No mouse events recorded. Only keystroke events will be used for baseline.",
-                className: "bg-warning text-warning-foreground"
-            });
-            console.warn("[Calibration] No mouse events recorded.");
-        }
+
         try {
             const payload = {
                 student_id: studentId,
                 calibration_session_id: sessionId,
-                course_name: DEFAULT_COURSE_NAME,
+                course_name: "General",
                 keystroke_events: keystrokeEvents,
                 mouse_events: mouseEvents,
             };
-            console.log("[Calibration] Baseline POST payload:", payload);
+
+            console.log("[Calibration] Sending payload to backend...");
+            
             const response = await fetch("http://127.0.0.1:5000/api/calibration/save-baseline", {
                 method: "POST",
                 headers: {
@@ -233,14 +214,34 @@ const CalibrationPage = () => {
                 },
                 body: JSON.stringify(payload),
             });
+
             const result = await response.json();
-            console.log("[Calibration] Baseline POST result:", result);
+            console.log("[Calibration] Backend response:", result);
+
+            if (result.status === "baseline_saved") {
+                console.log("[Calibration] ✓ Baseline saved successfully!");
+                console.log(`[Calibration] Threshold: ${result.threshold}`);
+                console.log(`[Calibration] Baseline quality: ${result.stats?.baseline_quality}`);
+                
+                toast({
+                    title: "Calibration Complete! ✅",
+                    description: `Baseline established. Threshold: ${result.threshold?.toFixed(2)}`,
+                });
+            } else {
+                console.warn("[Calibration] Unexpected response:", result);
+            }
+
         } catch (err) {
             console.error("[Calibration] Baseline POST error:", err);
+            toast({
+                title: "Network Error",
+                description: "Failed to save calibration data. Please try again.",
+                variant: "destructive"
+            });
         }
     };
 
-    const handleNext = async () => {
+    const handleNext = () => {
         setCurrentQuestionIndex(i => Math.min(i + 1, CALIBRATION_QUESTIONS.length - 1));
     };
 
@@ -254,16 +255,16 @@ const CalibrationPage = () => {
         if (!sessionId) {
             toast({
                 title: "Error",
-                description: "Calibration session not initialized. Please refresh.",
-                className: "bg-destructive text-destructive-foreground"
+                description: "Calibration session not initialized.",
+                variant: "destructive"
             });
             return;
         }
 
-        // 1. Post ALL accumulated raw data to the Flask server
+        // 1. Post baseline to backend
         await postCalibrationBaseline();
 
-        // 2. Update the Supabase session status to completed
+        // 2. Update Supabase session status
         const { error } = await supabase
             .from("calibration_sessions")
             .update({
@@ -273,22 +274,16 @@ const CalibrationPage = () => {
             .eq("id", sessionId);
 
         if (error) {
-            console.error("Supabase session update failed:", error);
+            console.error("Supabase update failed:", error);
             toast({
                 title: "Database Error",
-                description: "Failed to mark calibration session as complete.",
-                className: "bg-destructive text-destructive-foreground"
+                description: "Failed to mark calibration as complete.",
+                variant: "destructive"
             });
             return;
         }
 
-        // 3. Final steps
-        toast({
-            title: "Calibration Complete! 🚀",
-            description: "Your behavioral baseline data has been submitted and saved.",
-        });
-
-        // Reset dynamics after submission to clear the collected data
+        // 3. Reset dynamics
         keystrokeDynamics.resetMetrics();
         mouseDynamics.resetMetrics();
 
@@ -297,7 +292,14 @@ const CalibrationPage = () => {
     };
 
     if (loading) {
-        return <div className="flex items-center justify-center min-h-screen">Loading calibration...</div>;
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p>Loading calibration...</p>
+                </div>
+            </div>
+        );
     }
 
     const currentQuestion = CALIBRATION_QUESTIONS[currentQuestionIndex];
@@ -306,7 +308,7 @@ const CalibrationPage = () => {
 
     return (
         <div className="min-h-screen bg-background">
-            {/* Monitoring Notice Banner */}
+            {/* Monitoring Banner */}
             <div className="bg-primary text-primary-foreground px-4 py-2 flex items-center justify-center gap-2">
                 <div className="flex items-center gap-2 animate-pulse">
                     <div className="h-3 w-3 rounded-full bg-primary-foreground" />
@@ -315,7 +317,7 @@ const CalibrationPage = () => {
                 <span className="font-medium">Calibration in Progress - Behavioral Monitoring Active</span>
             </div>
 
-            {/* Header with Timer and Progress */}
+            {/* Header */}
             <header className="border-b bg-card">
                 <div className="container mx-auto px-4 py-4">
                     <div className="flex justify-between items-center mb-4">
@@ -330,8 +332,8 @@ const CalibrationPage = () => {
                     </div>
                     <div className="space-y-2">
                         <div className="flex justify-between text-sm text-muted-foreground">
-                            <span> Question {currentQuestionIndex + 1} of {CALIBRATION_QUESTIONS.length} </span>
-                            <span> Answered: {answeredCount} / {CALIBRATION_QUESTIONS.length} </span>
+                            <span>Question {currentQuestionIndex + 1} of {CALIBRATION_QUESTIONS.length}</span>
+                            <span>Answered: {answeredCount} / {CALIBRATION_QUESTIONS.length}</span>
                         </div>
                         <Progress value={progress} className="h-2" />
                     </div>
@@ -349,17 +351,12 @@ const CalibrationPage = () => {
                         </div>
                         <h2 className="text-lg font-semibold mb-6">{currentQuestion.text}</h2>
 
-                        {/* Conditional Rendering for Question Type */}
                         {currentQuestion.type === "mcq" && currentQuestion.options ? (
                             <RadioGroup
                                 value={answers[currentQuestion.id] || ""}
                                 onValueChange={(value) => handleAnswerChange(currentQuestion.id, value)}
                             >
-                                <div
-                                    className="space-y-3"
-                                    onMouseMove={mouseDynamics.handleMouseMove}
-                                    onClick={mouseDynamics.handleClick}
-                                >
+                                <div className="space-y-3">
                                     {currentQuestion.options.map((option, index) => (
                                         <div key={index} className="flex items-center space-x-2 p-3 rounded-md border hover:bg-accent transition-colors">
                                             <RadioGroupItem value={option} id={`option-${index}`} />
@@ -372,14 +369,12 @@ const CalibrationPage = () => {
                             <Textarea
                                 value={answers[currentQuestion.id] || ""}
                                 onChange={(e) => handleAnswerChange(currentQuestion.id, e.target.value)}
-                                onKeyDown={keystrokeDynamics.handleKeyDown}
-                                onKeyUp={keystrokeDynamics.handleKeyUp}
-                                placeholder="Type your answer here... (Your typing patterns are being recorded for calibration)"
+                                placeholder="Type your answer here... (Your typing patterns are being recorded)"
                                 className="min-h-[250px]"
                             />
                         )}
 
-                        {/* Navigation Buttons */}
+                        {/* Navigation */}
                         <div className="flex justify-between mt-8">
                             <Button
                                 onClick={handlePrevious}

@@ -7,11 +7,11 @@ export function useMouseDynamics() {
   const cursorPositions = useRef<CursorPos[]>([]);
 
   function handleMouseMove(e: MouseEvent | React.MouseEvent) {
-    cursorPositions.current.push({ x: (e as any).clientX, y: (e as any).clientY, t: Date.now() });
+    cursorPositions.current.push({ x: (e as any).clientX, y: (e as any).clientY, timestamp: Date.now() });
     if (cursorPositions.current.length > 1000) cursorPositions.current.shift();
   }
   function handleClick(e?: MouseEvent | React.MouseEvent) {
-    cursorPositions.current.push({ x: (e as any)?.clientX || 0, y: (e as any)?.clientY || 0, t: Date.now(), click: true });
+    cursorPositions.current.push({ x: (e as any)?.clientX || 0, y: (e as any)?.clientY || 0, timestamp: Date.now(), click: true });
   }
   function getCurrentMetrics() {
     return { cursorPositions: cursorPositions.current.slice() };
